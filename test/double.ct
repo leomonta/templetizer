@@ -1,0 +1,5 @@
+template <T, U>
+T func(U num) {
+	T res = helper(num)
+	return res;
+}
