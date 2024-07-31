@@ -1,12 +1,6 @@
 use std::env;
 use std::fs::File;
 
-macro_rules! Void {
-	() => {
-		Option::<Dummy>::None
-	};
-}
-
 // God forsaken code here
 struct Dummy {}
 
@@ -16,6 +10,7 @@ impl std::fmt::Debug for Dummy {
 	}
 }
 
+const Void: Option<Dummy> = Option::<Dummy>::None;
 
 fn abort<T, U: std::fmt::Debug>(s: &str, err: Option<U>) -> T {
 	match err {
@@ -29,8 +24,8 @@ fn main() {
 	let args: Vec<String> = env::args().collect();
 
 	match args.len() {
-		| 1 => abort("Not enough arguments: the first argument must be the target template", Void!()),
-		| 2 => abort("Not enough arguments: the second argument must be the type to complete the template with", Void!()),
+		| 1 => abort("Not enough arguments: the first argument must be the target template", Void),
+		| 2 => abort("Not enough arguments: the second argument must be the type to complete the template with", Void),
 		| _ => (),
 	}
 
