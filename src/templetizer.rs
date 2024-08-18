@@ -3,8 +3,6 @@
 
 use std::env;
 use std::fs;
-use std::io;
-use std::io::BufRead; // i should not need this
 
 // constants
 const INTERNAL_WILDCARD: char = '*';
@@ -30,8 +28,7 @@ fn abort<T, U: std::fmt::Debug>(s: &str, err: Option<U>) -> T {
 	std::process::exit(1);
 }
 
-fn parse_templated_tyoes(s: &String) -> Vec<String> {
-
+fn parse_templated_tyoes(s: &str) -> Vec<String> {
 	let mut res: Vec<String> = Vec::new();
 
 	let open_br = match s.find("<") {
@@ -67,29 +64,30 @@ fn main() {
 	let target_filename: &str = &args[1];
 	let target_type: &str = &args[2];
 
-	let target_file = match fs::OpenOptions::new().append(true).read(true).open(target_filename) {
-		| Ok(f) => f,
-		| Err(e) => abort("Failed to open the file", Some(e)),
+	let file_data = match fs::read_to_string(target_filename) {
+		| Ok(dt) => dt,
+		| Err(e) => abort(&format!("Could not read from the file{target_filename}"), Some(e)),
 	};
-
-	// cuz reading is too hard without a reader
-	let mut reader = io::BufReader::new(target_file);
 
 	let mut templated_names;
 
+	let mut old_nl = 0;
+
 	// reading line by line
 	loop {
-		let mut line: String = String::new();
-		let read_result = reader.read_line(&mut line);
-		match read_result {
-			| Ok(0) => break,
-			| Err(e) => abort(&format!("Could not read from the file{target_filename}"), Some(e)),
-			| _ => (),
-		}
+		let nl = match file_data.find("\n") {
+			| Some(val) => val + 1,
+			| None => abort("Invalid template syntax, missing '<'", Void),
+		};
+
+		let line = &file_data[old_nl..nl];
+		old_nl = nl;
 
 		if line.contains(TEMPLATE_KEY_WORD_START) {
-			templated_names = parse_templated_tyoes(&line);
+			templated_names = parse_templated_tyoes(line);
 			dbg!(templated_names);
+
+			// let end_templ = get_end_next_bracket()
 		}
 	}
 }
