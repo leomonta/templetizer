@@ -3,6 +3,7 @@
 
 use std::env;
 use std::fs;
+use std::io::Write;
 
 // constants
 const INTERNAL_WILDCARD: char = '*';
@@ -28,20 +29,52 @@ fn abort<T, U: std::fmt::Debug>(s: &str, err: Option<U>) -> T {
 	std::process::exit(1);
 }
 
-fn parse_templated_tyoes(s: &str) -> Vec<String> {
+fn complete_template(file_data: &str, template_names: &Vec<String>, target_types: &Vec<String>, mut output_file: &fs::File) -> usize {
+
+	let mut old_nl: usize = 0;
+	let mut nl: usize = 0;
+	let mut stack: Vec<char> = Vec::new();
+
+	loop {
+		let n: usize = template_names.len();	
+		for i in 0..template_names.len() {
+			match file_data.find(&template_names[i]) {
+				| Some(val) => {
+					output_file.write(file_data[old_nl..val].as_bytes()).expect("Failed Write");
+					output_file.write(target_types[i].as_bytes()).expect("Failed Write");
+					old_nl = val + template_names[i].len();
+				}
+				| None => ()
+			};
+		}
+
+		let line = &file_data[old_nl..nl];
+		old_nl = nl;
+	
+		output_file.write(line.as_bytes()).expect("Failed Write");
+		break;
+	}
+
+	return nl;
+}
+
+/// Given the template declaration (`template <T, U, V, ...>`)
+/// returns the template types (`T`, `U`, `V`) as a `Vec` of owned `String`s
+fn parse_templated_names(file_data: &str) -> (Vec<String>, usize) {
 	let mut res: Vec<String> = Vec::new();
 
-	let open_br = match s.find("<") {
+
+	let open_br = match file_data.find("<") {
 		| Some(val) => val + 1,
 		| None => abort("Invalid template syntax, missing '<'", Void),
 	};
 
-	let clos_br = match s.find(">") {
+	let clos_br = match file_data.find(">") {
 		| Some(val) => val,
 		| None => abort("Invalid template syntax, missing '>'", Void),
 	};
 
-	let slice = &s[open_br..clos_br];
+	let slice = &file_data[open_br..clos_br];
 
 	let parts = slice.split(",");
 
@@ -49,7 +82,7 @@ fn parse_templated_tyoes(s: &str) -> Vec<String> {
 		res.push(p.trim().to_owned());
 	}
 
-	return res;
+	return (res, clos_br + 1);
 }
 
 fn main() {
@@ -62,7 +95,7 @@ fn main() {
 	}
 
 	let target_filename: &str = &args[1];
-	let target_type: &str = &args[2];
+	let target_types = &args[2..].to_vec();
 
 	let file_data = match fs::read_to_string(target_filename) {
 		| Ok(dt) => dt,
@@ -70,24 +103,27 @@ fn main() {
 	};
 
 	let mut templated_names;
-
-	let mut old_nl = 0;
+	let mut old_nl: usize = 0;
+	let mut nl: usize = 0;
+	let mut output_file = fs::File::create("tl.out").expect("Failed Create");
 
 	// reading line by line
 	loop {
-		let nl = match file_data.find("\n") {
-			| Some(val) => val + 1,
-			| None => abort("Invalid template syntax, missing '<'", Void),
+		match file_data.find("\n") {
+			| Some(val) => nl = val,
+			| None => break,
 		};
 
 		let line = &file_data[old_nl..nl];
-		old_nl = nl;
 
 		if line.contains(TEMPLATE_KEY_WORD_START) {
-			templated_names = parse_templated_tyoes(line);
-			dbg!(templated_names);
+			(templated_names, old_nl) = parse_templated_names(&file_data[old_nl..]);
+			dbg!(&templated_names);
 
-			// let end_templ = get_end_next_bracket()
+			old_nl = complete_template(&file_data[old_nl..], &templated_names, target_types, &output_file);
+		} else {
+			output_file.write(line.as_bytes()).expect("Failed Write");
+			old_nl = nl;
 		}
 	}
 }
