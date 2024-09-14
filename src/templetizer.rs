@@ -31,26 +31,72 @@ fn abort<T, U: std::fmt::Debug>(s: &str, err: Option<U>) -> T {
 
 fn complete_template(file_data: &str, template_names: &Vec<String>, target_types: &Vec<String>, mut output_file: &fs::File) -> usize {
 
-	let mut old_nl: usize = 0;
-	let mut nl: usize = 0;
-	let mut stack: Vec<char> = Vec::new();
+	let mut old_c_stop: usize = 0;
+	let mut c_stop: usize = 0;
+	let mut chunk;
 
+	// loop all the {} to detectd the end of the function to templetize
+	// Do i need to separate in chunks the function body to remplace the templates? No
+	// but I need to deect the end of the function body (with the closing }) so i do both at the same time
+	// Is this a good implementation? no, it detects braces in strnigs as normal braces, but oh well
 	loop {
-		let n: usize = template_names.len();	
-		for i in 0..template_names.len() {
-			match file_data.find(&template_names[i]) {
-				| Some(val) => {
-					output_file.write(file_data[old_nl..val].as_bytes()).expect("Failed Write");
-					output_file.write(target_types[i].as_bytes()).expect("Failed Write");
-					old_nl = val + template_names[i].len();
-				}
-				| None => ()
-			};
+		let open_br = file_data.find("{");
+		let clos_br = file_data.find("}");
+
+		// close does not exists, open does
+		if clos_br.is_none() && open_br.is_some() {
+			stack.push('{');
+			c_stop = open_br.unwrap();
+
+		// the opposite
+		} else if open_br.is_none() && clos_br.is_some() {
+			if stack.last().is_some() {
+				abort("Wring syntax, '}' without a matching '{'", Void);
+			}
+			c_stop = clos_br.unwrap();
+
+		// both None
+		} else if open_br.is_none() && clos_br.is_none() {
+			// we're done here,
+			break;
+
+		// the close bracket is first
+		} else if Some(open_br) > Some(clos_br) {
+			if stack.last().is_some() {
+				abort("Wring syntax, '}' without a matching '{'", Void);
+			}
+			c_stop = clos_br.unwrap();
+
+		// the open bracket is first
+		} else if Some(open_br) < Some(clos_br) {
+			stack.push('{');
+			c_stop = open_br.unwrap();
 		}
 
-		let line = &file_data[old_nl..nl];
-		old_nl = nl;
-	
+		chunk = &file_data[old_c_stop..c_stop];
+
+		// replace all of the template types in the chunk
+		loop {
+			let mut found = false;
+			for i in 0..template_names.len() {
+				match file_data.find(&template_names[i]) {
+					| Some(val) => {
+						output_file.write(file_data[old_c_stop..val].as_bytes()).expect("Failed Write");
+						output_file.write(target_types[i].as_bytes()).expect("Failed Write");
+						old_c_stop = val + template_names[i].len();
+						found = true;
+					}
+					| None => (),
+				};
+			}
+			if !found {
+				break;
+			}
+		}
+
+		let line = &file_data[old_c_stop..c_stop];
+		old_c_stop = c_stop;
+
 		output_file.write(line.as_bytes()).expect("Failed Write");
 		break;
 	}
@@ -62,7 +108,6 @@ fn complete_template(file_data: &str, template_names: &Vec<String>, target_types
 /// returns the template types (`T`, `U`, `V`) as a `Vec` of owned `String`s
 fn parse_templated_names(file_data: &str) -> (Vec<String>, usize) {
 	let mut res: Vec<String> = Vec::new();
-
 
 	let open_br = match file_data.find("<") {
 		| Some(val) => val + 1,
