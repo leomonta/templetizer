@@ -1,9 +1,12 @@
 #![allow(nonstandard_style)]
 #![allow(dead_code)]
 
+use std::time;
 use std::env;
 use std::fs;
 use std::io::Write;
+use std::thread;
+use std::usize;
 
 // constants
 const INTERNAL_WILDCARD: char = '*';
@@ -29,8 +32,68 @@ fn abort<T, U: std::fmt::Debug>(s: &str, err: Option<U>) -> T {
 	std::process::exit(1);
 }
 
-fn complete_template(file_data: &str, template_names: &Vec<String>, target_types: &Vec<String>, mut output_file: &fs::File) -> usize {
 
+fn get_func_end(mut file_data: &str) -> usize {
+
+	let mut stack: Vec<char> = Vec::new();
+	let mut res: usize = 0;
+	let mut stop: usize = 0;
+
+	loop {
+		let open_br = file_data.find("{").unwrap_or(usize::MAX);
+		let clos_br = file_data.find("}").unwrap_or(usize::MAX);
+
+		// both paren were not found,
+		// we're done here
+		if open_br == clos_br {
+			break;
+
+		// the close bracket is first
+		} else if open_br > clos_br {
+			if !stack.last().is_some() {
+				return abort("Wring syntax, '}' without a matching '{'", Void);
+			}
+			stack.pop().unwrap();
+			stop = clos_br + 1;
+
+		// the open bracket is first
+		} else if open_br < clos_br {
+			stack.push('{');
+			stop = open_br + 1;
+		}
+
+		res += stop;
+
+		if stack.is_empty() {
+			break;
+		}
+
+		file_data = &file_data[stop..];
+	}
+
+	return res;
+}
+
+fn complete_template(file_data: &str, template_names: &Vec<String>, target_types: &Vec<String>, mut output_file: &fs::File) -> usize {
+	
+	return 0;
+
+	/*
+	This function, to work nicely, needs a lexer, a tokenizer, a CFG decoder, however the fuck is called the thing in the compiler that recognizes keywords, operators, and names.
+	But I ain't gonna do that. 
+	Not even gonna fucking try. C isn't super diffucult (except things like function pointers typedefs) but still.. No
+
+	I'm gonna assume that no one is feeding this tool minified C code (if such a thing even exists), so i will assume that all template types have at least a space after them
+	(thing I'm pretty sure is obligatory) and check for opening and closign brackets, '{' and '}',
+	
+	This means that anything inside comments will not be treated as such, so you might fuck up the function end detection with brackets inside comments, and the templated type will be replaced  inside of them
+
+	good lucl
+	*/
+
+
+
+	/*
 	let mut old_c_stop: usize = 0;
 	let mut c_stop: usize = 0;
 	let mut chunk;
@@ -42,36 +105,6 @@ fn complete_template(file_data: &str, template_names: &Vec<String>, target_types
 	loop {
 		let open_br = file_data.find("{");
 		let clos_br = file_data.find("}");
-
-		// close does not exists, open does
-		if clos_br.is_none() && open_br.is_some() {
-			stack.push('{');
-			c_stop = open_br.unwrap();
-
-		// the opposite
-		} else if open_br.is_none() && clos_br.is_some() {
-			if stack.last().is_some() {
-				abort("Wring syntax, '}' without a matching '{'", Void);
-			}
-			c_stop = clos_br.unwrap();
-
-		// both None
-		} else if open_br.is_none() && clos_br.is_none() {
-			// we're done here,
-			break;
-
-		// the close bracket is first
-		} else if Some(open_br) > Some(clos_br) {
-			if stack.last().is_some() {
-				abort("Wring syntax, '}' without a matching '{'", Void);
-			}
-			c_stop = clos_br.unwrap();
-
-		// the open bracket is first
-		} else if Some(open_br) < Some(clos_br) {
-			stack.push('{');
-			c_stop = open_br.unwrap();
-		}
 
 		chunk = &file_data[old_c_stop..c_stop];
 
@@ -102,6 +135,7 @@ fn complete_template(file_data: &str, template_names: &Vec<String>, target_types
 	}
 
 	return nl;
+	*/
 }
 
 /// Given the template declaration (`template <T, U, V, ...>`)
@@ -165,7 +199,10 @@ fn main() {
 			(templated_names, old_nl) = parse_templated_names(&file_data[old_nl..]);
 			dbg!(&templated_names);
 
-			old_nl = complete_template(&file_data[old_nl..], &templated_names, target_types, &output_file);
+			let func_end = old_nl + get_func_end(&file_data[old_nl..]);
+			println!("{}", &file_data[old_nl..func_end]);
+			return;
+			old_nl = complete_template(&file_data[old_nl..func_end], &templated_names, target_types, &output_file);
 		} else {
 			output_file.write(line.as_bytes()).expect("Failed Write");
 			old_nl = nl;
