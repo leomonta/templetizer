@@ -1,6 +1,7 @@
 #![allow(nonstandard_style)]
 #![allow(dead_code)]
 
+use std::process::exit;
 use std::time;
 use std::env;
 use std::fs;
@@ -72,12 +73,25 @@ fn get_func_end(mut file_data: &str) -> usize {
 	}
 
 	return res;
+
 }
 
-fn complete_template(file_data: &str, template_names: &Vec<String>, target_types: &Vec<String>, mut output_file: &fs::File) -> usize {
-	
-	return 0;
 
+fn min_index(arr: &Vec<usize>) -> usize {
+	// wow, such algorithm
+	let mut min = 0;
+	for i in 1..arr.len() {
+		if arr[i] < arr[min] {
+			min = i;
+		}
+	}
+
+	return min;
+}
+
+/// given a slice containing a function, replaces all of the template types with the target types
+fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_types: &Vec<String>, mut output_file: &fs::File) -> usize {
+	
 	/*
 	This function, to work nicely, needs a lexer, a tokenizer, a CFG decoder, however the fuck is called the thing in the compiler that recognizes keywords, operators, and names.
 	But I ain't gonna do that. 
@@ -88,26 +102,35 @@ fn complete_template(file_data: &str, template_names: &Vec<String>, target_types
 	
 	This means that anything inside comments will not be treated as such, so you might fuck up the function end detection with brackets inside comments, and the templated type will be replaced  inside of them
 
-	good lucl
+	good luck
 	*/
 
+	let mut positions: Vec<usize> = vec![0; template_names.len()];
+	let mut old_stop: usize = 0;
+	let mut stop: usize = 0;
 
-
-	/*
-	let mut old_c_stop: usize = 0;
-	let mut c_stop: usize = 0;
-	let mut chunk;
-
-	// loop all the {} to detectd the end of the function to templetize
-	// Do i need to separate in chunks the function body to remplace the templates? No
-	// but I need to deect the end of the function body (with the closing }) so i do both at the same time
-	// Is this a good implementation? no, it detects braces in strnigs as normal braces, but oh well
 	loop {
-		let open_br = file_data.find("{");
-		let clos_br = file_data.find("}");
 
-		chunk = &file_data[old_c_stop..c_stop];
+		for i in 0..template_names.len() {
+			positions[i] = file_data.find(&template_names[i]).unwrap_or(usize::MAX);
+		}
 
+		let next = min_index(&positions);
+		dbg!(&positions);
+		dbg!(&next);
+		exit(0);
+
+		// no template type has been found
+		if positions[next] == usize::MAX {
+			break;
+		}
+
+		output_file.write(file_data[old_stop..positions[next]].as_bytes()).expect("Failed Write");
+		output_file.write(target_types[next].as_bytes()).expect("Failed Write");
+
+		file_data = &file_data[positions[next]..];
+
+		/*
 		// replace all of the template types in the chunk
 		loop {
 			let mut found = false;
@@ -132,10 +155,10 @@ fn complete_template(file_data: &str, template_names: &Vec<String>, target_types
 
 		output_file.write(line.as_bytes()).expect("Failed Write");
 		break;
+		*/
 	}
 
-	return nl;
-	*/
+	return 0;
 }
 
 /// Given the template declaration (`template <T, U, V, ...>`)
@@ -197,11 +220,8 @@ fn main() {
 
 		if line.contains(TEMPLATE_KEY_WORD_START) {
 			(templated_names, old_nl) = parse_templated_names(&file_data[old_nl..]);
-			dbg!(&templated_names);
 
 			let func_end = old_nl + get_func_end(&file_data[old_nl..]);
-			println!("{}", &file_data[old_nl..func_end]);
-			return;
 			old_nl = complete_template(&file_data[old_nl..func_end], &templated_names, target_types, &output_file);
 		} else {
 			output_file.write(line.as_bytes()).expect("Failed Write");
