@@ -1,0 +1,7 @@
+template <T>
+typedef struct {
+	T* data;
+	size_t capacity;
+	size_t len;
+
+} Vector_;

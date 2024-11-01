@@ -1,0 +1,10 @@
+- [ ] Done
+	- [ ] cli interface
+		- [ ] specify which template name is which type
+		- [x] basic
+		- [ ] specify which file is which
+	- [ ] general
+		- [ ] multi file replacement with one execution
+	- [ ] main
+		- [x] basic template replacement
+		- [ ] template replacement for type (e.g.vector_T -> vector_int )
