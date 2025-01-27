@@ -1,10 +1,20 @@
 #![allow(nonstandard_style)]
 #![allow(dead_code)]
 
+/*
+Glossary, to clarify a couple of concepts
+template type: S, T, U, V, ... when considered as actual type, means kinda the same as template name
+template name: S, T, U, V, ... when considered as text
+
+*/
+
 use std::env;
 use std::fs;
 use std::io::Write;
 use std::usize;
+
+extern crate regex;
+use regex::Regex;
 
 // constants
 const INTERNAL_WILDCARD: char = '*';
@@ -22,6 +32,8 @@ impl std::fmt::Debug for Dummy {
 
 const Void: Option<Dummy> = Option::<Dummy>::None;
 
+/// The whole point of this function is to exit the program with an error printed, I later found out about `.expect(...)`
+/// but this is still usefull in some occasions
 fn abort<T, U: std::fmt::Debug>(s: &str, err: Option<U>) -> T {
 	match err {
 		| Some(e) => eprintln!("Aborting: {}\n\t{:#?}", s, e),
@@ -30,6 +42,7 @@ fn abort<T, U: std::fmt::Debug>(s: &str, err: Option<U>) -> T {
 	std::process::exit(1);
 }
 
+/// returns the position, for the given string ref, of the first `\n` closing curly bracket `}` matching the first open curly bracket `{`
 fn get_func_end(mut file_data: &str) -> usize {
 	let mut stack: Vec<char> = Vec::new();
 	let mut res: usize = 0;
@@ -47,7 +60,7 @@ fn get_func_end(mut file_data: &str) -> usize {
 		// the close bracket is first
 		} else if open_br > clos_br {
 			if !stack.last().is_some() {
-				return abort("Wring syntax, '}' without a matching '{'", Void);
+				return abort("Wrong syntax, '}' without a matching '{'", Void);
 			}
 			stack.pop().unwrap();
 			stop = clos_br + 1;
@@ -60,16 +73,19 @@ fn get_func_end(mut file_data: &str) -> usize {
 
 		res += stop;
 
+		file_data = &file_data[stop..];
+
 		if stack.is_empty() {
 			break;
 		}
-
-		file_data = &file_data[stop..];
 	}
+
+	res += file_data.find('\n').unwrap_or(0);
 
 	return res;
 }
 
+/// returns the index of the smallest element in the given vector
 fn min_index(arr: &Vec<usize>) -> usize {
 	// wow, such algorithm
 	let mut min = 0;
@@ -87,24 +103,33 @@ fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_t
 	/*
 	This function, to work nicely, needs a lexer, a tokenizer, a CFG decoder, however the fuck is called the thing in the compiler that recognizes keywords, operators, and names.
 	But I ain't gonna do that.
-	Not even gonna fucking try. C isn't super diffucult (except things like function pointers typedefs) but still.. No
+	Not even gonna fucking try. C isn't super diffucult (except things like function pointers typedefs) but still, there are multiple standars and dialects for each compiler, thus No.
 
 	I'm gonna assume that no one is feeding this tool minified C code (if such a thing even exists), so i will assume that all template types have at least a space after them
 	(thing I'm pretty sure is obligatory) and check for opening and closign brackets, '{' and '}',
 
-	This means that anything inside comments will not be treated as such, so you might fuck up the function end detection with brackets inside comments, and the templated type will be replaced  inside of them
+	This means that anything inside comments will not be treated as such, so you might fuck up the function end detection with brackets inside comments, and the templated type will be replaced inside of them.
 
 	good luck
 	*/
 
-	// positions of all the templates types in the file
-	let mut positions: Vec<usize> = vec![0; template_names.len()];
+	// records all of the position, to figure out which comes first
+	let mut positions: Vec<[usize; 2]> = Vec::new();
 
-	loop {
-		// find all template types
-		for i in 0..template_names.len() {
-			positions[i] = file_data.find(&template_names[i]).unwrap_or(usize::MAX);
+	// for all template types
+	for i in 0..template_names.len() {
+
+		let tmp = format!(r"\W{}\W|##{}", template_names[i], template_names[i]);
+		let needle = Regex::new(&tmp).unwrap(); // no need to take care of any error, the pattern is valid and too small to fail
+
+		// for all the matches
+		for	m in needle.find_iter(file_data) {
+			positions.push([m.start(), m.end()]);
 		}
+	}
+
+	/*
+	loop {
 
 		// and select the closest
 		let next = min_index(&positions);
@@ -119,14 +144,14 @@ fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_t
 
 		file_data = &file_data[positions[next] + 1..];
 	}
-
+	*/
 	// print the rest of the chunk
 	output_file.write(file_data.as_bytes()).expect("Failed Write");
 }
 
 /// Given the template declaration (`template <T, U, V, ...>`)
-/// returns the template placeholders types (`T`, `U`, `V`) as a `Vec` of owned `String`s
-fn parse_template_placeholders(file_data: &str) -> (Vec<String>, usize) {
+/// returns the template types (`T`, `U`, `V`) as a `Vec` of owned `String`s
+fn parse_template_declarations(file_data: &str) -> (Vec<String>, usize) {
 	let mut res: Vec<String> = Vec::new();
 
 	let open_br = match file_data.find("<") {
@@ -170,7 +195,7 @@ fn main() {
 	// WTH Rust WTH
 	let mut file_data = &file[0..];
 
-	let mut template_placeholders;
+	let mut template_decls;
 	let mut nl: usize = 0;
 	let mut old_nl: usize;
 	let mut output_file = fs::File::create("tl.out").expect("Failed Create");
@@ -184,30 +209,29 @@ fn main() {
 			| None => break,
 		};
 
-		let line = &file_data[old_nl..nl];
+		let line = &file_data[..nl];
 
 		line_num += 1;
 
 		if !line.contains(TEMPLATE_KEY_WORD_START) {
 			output_file.write(line.as_bytes()).expect("Failed Write");
-			continue;
 		} else {
-			(template_placeholders, old_nl) = parse_template_placeholders(&file_data[old_nl..]);
+			(template_decls, old_nl) = parse_template_declarations(&file_data);
 
-			let ph_len = template_placeholders.len();
+			let dc_len = template_decls.len();
 			let tt_len = target_types.len();
 
-			if tt_len != ph_len {
-				abort::<i32, Dummy>(&format!("The target types ({tt_len}) do not match the number of template placeholders ({ph_len}) at line {line_num}"), Void);
+			if tt_len != dc_len {
+				abort::<i32, Dummy>(&format!("The target types ({tt_len}) do not match the number of template placeholders ({dc_len}) at line {line_num}"), Void);
 			}
 
 			// precalculate the boundaries of the function to simplify the template completion
 			// Yes, this is double work, it can be improved. I'll do it when i'll run into performance problem
-			let func_end = old_nl + get_func_end(&file_data[old_nl..]);
-			complete_template(&file_data[old_nl..func_end], &template_placeholders, target_types, &output_file);
+			let func_end = get_func_end(&file_data);
+			complete_template(&file_data[..func_end], &template_decls, target_types, &output_file);
 			nl = func_end;
 		}
 
-		file_data = &file_data[nl+1..];
+		file_data = &file_data[(nl + 1)..];
 	}
 }

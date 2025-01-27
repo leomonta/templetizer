@@ -5,3 +5,6 @@ version = "0.1.0"
 [[bin]]
 name = "templetizer"
 path = "src/templetizer.rs"
+
+[dependencies]
+regex = "1.11.1"
