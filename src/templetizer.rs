@@ -42,7 +42,7 @@ fn abort<T, U: std::fmt::Debug>(s: &str, err: Option<U>) -> T {
 	std::process::exit(1);
 }
 
-/// returns the position, for the given string ref, of the first `\n` closing curly bracket `}` matching the first open curly bracket `{`
+/// returns the position, for the given string ref, of the first `\n` after the closing curly bracket `}` matching the first open curly bracket `{`
 fn get_func_end(mut file_data: &str) -> usize {
 	let mut stack: Vec<char> = Vec::new();
 	let mut res: usize = 0;
@@ -117,9 +117,9 @@ fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_t
 	let mut positions: Vec<[usize; 2]> = Vec::new();
 
 	// for all template types
-	for i in 0..template_names.len() {
+	for T in template_names {
 
-		let tmp = format!(r"\W{}\W|##{}", template_names[i], template_names[i]);
+		let tmp = format!(r"\W{}\W|##{}", T, T);
 		let needle = Regex::new(&tmp).unwrap(); // no need to take care of any error, the pattern is valid and too small to fail
 
 		// for all the matches
@@ -128,23 +128,39 @@ fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_t
 		}
 	}
 
-	/*
-	loop {
 
-		// and select the closest
-		let next = min_index(&positions);
+	// this i stecnically useless
+	// I need the matches to be in order to easily be able to write till the match, write the tartget type, and continue
+	// and the regex matches from the start of the string to the end, so in order.
+	// also I'm sorting array of non intersecting values (cuz of how the regex works) and have no idea how it works
+	// but I'll keep it here for now
+	positions.sort();
+	let mut indx: usize = 1; // keep track of which target type we need to replace the name with
+	let mut stop: usize = 0;
 
-		// no template type has been found
-		if positions[next] == usize::MAX {
-			break;
+	// positions  = Vec<[start, end]>
+	// just like slices, start is included, end is excluded
+	for span in positions {
+
+		//                                    01 23
+		//                                   \WT\W
+		output_file.write(file_data[stop..span[0] + 1].as_bytes()).expect("Failed Write");
+
+
+		// need to get which
+		for i in 0..template_names.len() {
+			//             01 2 3                                      0123
+			//            \WT\W                                        ##T
+			if file_data[span[0] + 1..span[0] + 2] == template_names[i] || file_data[span[0] + 2..span[1]] == template_names[i] {
+				indx = i
+			}
 		}
 
-		output_file.write(file_data[..positions[next]].as_bytes()).expect("Failed Write");
-		output_file.write(target_types[next].as_bytes()).expect("Failed Write");
+		output_file.write(template_names[indx].as_bytes()).expect("Failed Write");
 
-		file_data = &file_data[positions[next] + 1..];
+		stop = span[1]
 	}
-	*/
+	file_data = &file_data[stop..];
 	// print the rest of the chunk
 	output_file.write(file_data.as_bytes()).expect("Failed Write");
 }
@@ -203,7 +219,7 @@ fn main() {
 
 	// reading line by line
 	loop {
-		old_nl = nl;
+		// old_nl = nl;
 		match file_data.find("\n") {
 			| Some(val) => nl = val,
 			| None => break,
@@ -217,6 +233,13 @@ fn main() {
 			output_file.write(line.as_bytes()).expect("Failed Write");
 		} else {
 			(template_decls, old_nl) = parse_template_declarations(&file_data);
+			match file_data.find("\n") {
+				| Some(val) => nl = val,
+				| None => break,
+			};
+
+			// skip the template declaration line
+			file_data = &file_data[nl + 1..];
 
 			let dc_len = template_decls.len();
 			let tt_len = target_types.len();
