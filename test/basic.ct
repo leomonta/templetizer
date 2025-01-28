@@ -1,5 +1,5 @@
 template <T>
 T func(T num) {
 	T res = num * 2;
-	return res;
+	Teturn res;
 }

@@ -11,6 +11,7 @@ template name: S, T, U, V, ... when considered as text
 use std::env;
 use std::fs;
 use std::io::Write;
+use std::process::exit;
 use std::usize;
 
 extern crate regex;
@@ -114,20 +115,38 @@ fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_t
 	*/
 
 	// records all of the position, to figure out which comes first
-	let mut positions: Vec<[usize; 2]> = Vec::new();
+	// Vec<[start, end, template type index]>
+	let mut positions: Vec<[usize; 3]> = Vec::new();
 
 	// for all template types
-	for T in template_names {
+	for i in 0..template_names.len() {
 
-		let tmp = format!(r"\W{}\W|##{}", T, T);
+		let T = &template_names[i];
+
+		let tmp = format!(r"\W({})\W|(##{})|^({})", T, T, T);
 		let needle = Regex::new(&tmp).unwrap(); // no need to take care of any error, the pattern is valid and too small to fail
 
 		// for all the matches
-		for	m in needle.find_iter(file_data) {
-			positions.push([m.start(), m.end()]);
+		for	c in needle.captures_iter(file_data) {
+			let mut cap = c.get(1);
+			if cap == None {
+				cap = c.get(2);
+			}
+
+			if cap == None {
+				cap = c.get(3);
+			}
+
+			if cap == None {
+				println!("The regex return an empty capture, somehow.");
+				exit(1);
+			}
+
+			let m  = cap.unwrap();
+
+			positions.push([m.start(), m.end(), i]);
 		}
 	}
-
 
 	// this i stecnically useless
 	// I need the matches to be in order to easily be able to write till the match, write the tartget type, and continue
@@ -135,28 +154,15 @@ fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_t
 	// also I'm sorting array of non intersecting values (cuz of how the regex works) and have no idea how it works
 	// but I'll keep it here for now
 	positions.sort();
-	let mut indx: usize = 1; // keep track of which target type we need to replace the name with
 	let mut stop: usize = 0;
 
 	// positions  = Vec<[start, end]>
 	// just like slices, start is included, end is excluded
 	for span in positions {
 
-		//                                    01 23
-		//                                   \WT\W
-		output_file.write(file_data[stop..span[0] + 1].as_bytes()).expect("Failed Write");
+		output_file.write(file_data[stop..span[0]].as_bytes()).expect("Failed Write");
 
-
-		// need to get which
-		for i in 0..template_names.len() {
-			//             01 2 3                                      0123
-			//            \WT\W                                        ##T
-			if file_data[span[0] + 1..span[0] + 2] == template_names[i] || file_data[span[0] + 2..span[1]] == template_names[i] {
-				indx = i
-			}
-		}
-
-		output_file.write(template_names[indx].as_bytes()).expect("Failed Write");
+		output_file.write(template_names[span[2]].as_bytes()).expect("Failed Write");
 
 		stop = span[1]
 	}
