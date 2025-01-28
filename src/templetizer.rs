@@ -1,5 +1,4 @@
 #![allow(nonstandard_style)]
-#![allow(dead_code)]
 
 /*
 Glossary, to clarify a couple of concepts
@@ -15,11 +14,12 @@ use std::process::exit;
 use std::usize;
 
 extern crate regex;
+use regex::Match;
 use regex::Regex;
 
 // constants
 const INTERNAL_WILDCARD: char = '*';
-const TEMPLATE_KEY_WORD_START: &str = "template";
+const TEMPLATE_DECLARATION_KEYWORD: &str = "template";
 const TEMPLATE_KEY_WORD_END: &str = ">";
 
 // God forsaken code here
@@ -99,6 +99,22 @@ fn min_index(arr: &Vec<usize>) -> usize {
 	return min;
 }
 
+/// reads and writes to file the input file untile the 'template<...>' keyword is found
+/// returns the parsed templated 
+fn consume_till_template(file_data: &str, mut output_file: &fs::File) -> (usize, usize) {
+	let tmp = format!(r"{}\s?<.*>.*\n", TEMPLATE_DECLARATION_KEYWORD);
+	let re = Regex::new(&tmp).unwrap(); // no need to take care of any error, the pattern is valid and too small to fail
+
+	let res = re.find(file_data);
+	if res == None {
+		output_file.write(file_data.as_bytes()).expect("Failed Write");
+		return abort("Template declaration not found. Skipping", Void);
+	} else {
+		let m = res.unwrap();
+		return (m.start(), m.end());
+	}
+}
+
 /// given a slice containing a function, replaces all of the template types with the target types
 fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_types: &Vec<String>, mut output_file: &fs::File) {
 	/*
@@ -120,14 +136,13 @@ fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_t
 
 	// for all template types
 	for i in 0..template_names.len() {
-
 		let T = &template_names[i];
 
 		let tmp = format!(r"\W({})\W|(##{})|^({})", T, T, T);
-		let needle = Regex::new(&tmp).unwrap(); // no need to take care of any error, the pattern is valid and too small to fail
+		let re = Regex::new(&tmp).unwrap(); // no need to take care of any error, the pattern is valid and too small to fail
 
 		// for all the matches
-		for	c in needle.captures_iter(file_data) {
+		for c in re.captures_iter(file_data) {
 			let mut cap = c.get(1);
 			if cap == None {
 				cap = c.get(2);
@@ -142,7 +157,7 @@ fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_t
 				exit(1);
 			}
 
-			let m  = cap.unwrap();
+			let m = cap.unwrap();
 
 			positions.push([m.start(), m.end(), i]);
 		}
@@ -159,7 +174,6 @@ fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_t
 	// positions  = Vec<[start, end]>
 	// just like slices, start is included, end is excluded
 	for span in positions {
-
 		output_file.write(file_data[stop..span[0]].as_bytes()).expect("Failed Write");
 
 		output_file.write(template_names[span[2]].as_bytes()).expect("Failed Write");
@@ -173,7 +187,7 @@ fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_t
 
 /// Given the template declaration (`template <T, U, V, ...>`)
 /// returns the template types (`T`, `U`, `V`) as a `Vec` of owned `String`s
-fn parse_template_declarations(file_data: &str) -> (Vec<String>, usize) {
+fn parse_template_declarations(file_data: &str) -> Vec<String> {
 	let mut res: Vec<String> = Vec::new();
 
 	let open_br = match file_data.find("<") {
@@ -194,7 +208,7 @@ fn parse_template_declarations(file_data: &str) -> (Vec<String>, usize) {
 		res.push(p.trim().to_owned());
 	}
 
-	return (res, clos_br + 1);
+	return res;
 }
 
 fn main() {
@@ -214,53 +228,50 @@ fn main() {
 		| Err(e) => abort(&format!("Could not read from the file {target_filename}"), Some(e)),
 	};
 
-	// WTH Rust WTH
-	let mut file_data = &file[0..];
-
-	let mut template_decls;
-	let mut nl: usize = 0;
-	let mut old_nl: usize;
 	let mut output_file = fs::File::create("tl.out").expect("Failed Create");
-	let mut line_num: usize = 0;
 
-	// reading line by line
-	loop {
-		// old_nl = nl;
-		match file_data.find("\n") {
-			| Some(val) => nl = val,
-			| None => break,
-		};
+	let (start, end) = consume_till_template(&file[0..], &output_file);
 
-		let line = &file_data[..nl];
+	// the TEMPLATE_DECLARATION_KEYWORD might not have been found
+	let template_decls = parse_template_declarations(&file[start..end]);
 
-		line_num += 1;
 
-		if !line.contains(TEMPLATE_KEY_WORD_START) {
-			output_file.write(line.as_bytes()).expect("Failed Write");
-		} else {
-			(template_decls, old_nl) = parse_template_declarations(&file_data);
+
+	return;
+	/*
+
+		// WTH Rust WTH
+		let mut file_data = &file[0..];
+		let mut line_num: usize = 0; // needed to diagnostics
+
+		// reading line by line
+		let mut nl: usize = 0;
+		loop {
+
 			match file_data.find("\n") {
 				| Some(val) => nl = val,
 				| None => break,
 			};
 
-			// skip the template declaration line
-			file_data = &file_data[nl + 1..];
+			let line = &file_data[..nl];
 
-			let dc_len = template_decls.len();
-			let tt_len = target_types.len();
+			line_num += 1;
 
-			if tt_len != dc_len {
-				abort::<i32, Dummy>(&format!("The target types ({tt_len}) do not match the number of template placeholders ({dc_len}) at line {line_num}"), Void);
+			file_data = &file_data[(nl + 1)..];
+			if line.contains(TEMPLATE_DECLARATION_KEYWORD) {
+				found = TRUE;
+				break;
 			}
-
-			// precalculate the boundaries of the function to simplify the template completion
-			// Yes, this is double work, it can be improved. I'll do it when i'll run into performance problem
-			let func_end = get_func_end(&file_data);
-			complete_template(&file_data[..func_end], &template_decls, target_types, &output_file);
-			nl = func_end;
+			output_file.write(line.as_bytes()).expect("Failed Write");
 		}
 
-		file_data = &file_data[(nl + 1)..];
-	}
+
+		let dc_len = template_decls.len();
+		let tt_len = target_types.len();
+		if tt_len != dc_len {
+			abort::<i32, Dummy>(&format!("The target types ({tt_len}) do not match the number of template placeholders ({dc_len}) at line {line_num}"), Void);
+		}
+
+		complete_template(&file_data, &template_decls, target_types, &output_file);
+	*/
 }
