@@ -99,10 +99,10 @@ fn min_index(arr: &Vec<usize>) -> usize {
 	return min;
 }
 
-/// reads and writes to file the input file untile the 'template<...>' keyword is found
+/// reads and writes to the output file the input file until the 'template<...>' keyword is found
 /// returns the parsed templated 
 fn consume_till_template(file_data: &str, mut output_file: &fs::File) -> (usize, usize) {
-	let tmp = format!(r"{}\s?<.*>.*\n", TEMPLATE_DECLARATION_KEYWORD);
+	let tmp = format!(r"{TEMPLATE_DECLARATION_KEYWORD}\s?<.*>");
 	let re = Regex::new(&tmp).unwrap(); // no need to take care of any error, the pattern is valid and too small to fail
 
 	let res = re.find(file_data);
@@ -115,17 +115,17 @@ fn consume_till_template(file_data: &str, mut output_file: &fs::File) -> (usize,
 	}
 }
 
-/// given a slice containing a function, replaces all of the template types with the target types
-fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_types: &Vec<String>, mut output_file: &fs::File) {
+/// reads and writes to the output file the input file, if a template type if found, it is replaced with the corresponding target type
+fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_types: &Vec<String>, mut output_file: &fs::File) {
 	/*
-	This function, to work nicely, needs a lexer, a tokenizer, a CFG decoder, however the fuck is called the thing in the compiler that recognizes keywords, operators, and names.
+	This function, to work nicely, would need a lexer, a tokenizer, a CFG decoder, however the fuck is called the thing in the compiler that recognizes keywords, operators, and names.
 	But I ain't gonna do that.
 	Not even gonna fucking try. C isn't super diffucult (except things like function pointers typedefs) but still, there are multiple standars and dialects for each compiler, thus No.
 
-	I'm gonna assume that no one is feeding this tool minified C code (if such a thing even exists), so i will assume that all template types have at least a space after them
-	(thing I'm pretty sure is obligatory) and check for opening and closign brackets, '{' and '}',
+	I have no idea which edge case I'm missing but oh well, I'll burn that burn when I'll get there.
 
-	This means that anything inside comments will not be treated as such, so you might fuck up the function end detection with brackets inside comments, and the templated type will be replaced inside of them.
+	I know that comments are not treated as such, so it might happen that a rendom `T` will get detected and promptly substituted
+	But that's a feature if you ask me, templated comments, a revoluton in documentation generation
 
 	good luck
 	*/
@@ -138,7 +138,11 @@ fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_t
 	for i in 0..template_names.len() {
 		let T = &template_names[i];
 
-		let tmp = format!(r"\W({})\W|(##{})|^({})", T, T, T);
+		// captruing:
+		//    a T between non words
+		//    a T preceded by two hashes ##
+		//    a T at the very start of the line followed by a non word
+		let tmp = format!(r"\W({T})\W|(##{T})|^({T})\W");
 		let re = Regex::new(&tmp).unwrap(); // no need to take care of any error, the pattern is valid and too small to fail
 
 		// for all the matches
@@ -153,8 +157,7 @@ fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_t
 			}
 
 			if cap == None {
-				println!("The regex return an empty capture, somehow.");
-				exit(1);
+				abort::<i32, Dummy>("The regex returned an empty capture, somehow.", Void);
 			}
 
 			let m = cap.unwrap();
@@ -163,20 +166,22 @@ fn complete_template(mut file_data: &str, template_names: &Vec<String>, target_t
 		}
 	}
 
-	// this i stecnically useless
 	// I need the matches to be in order to easily be able to write till the match, write the tartget type, and continue
 	// and the regex matches from the start of the string to the end, so in order.
+	// but if there are multiple template types the regex need to run for each one, thus possibly producing unirdered matches
 	// also I'm sorting array of non intersecting values (cuz of how the regex works) and have no idea how it works
-	// but I'll keep it here for now
 	positions.sort();
+
+	dbg!(&positions);
+
 	let mut stop: usize = 0;
 
-	// positions  = Vec<[start, end]>
+	// positions  = Vec<[start, end, index]>
 	// just like slices, start is included, end is excluded
 	for span in positions {
 		output_file.write(file_data[stop..span[0]].as_bytes()).expect("Failed Write");
 
-		output_file.write(template_names[span[2]].as_bytes()).expect("Failed Write");
+		output_file.write(target_types[span[2]].as_bytes()).expect("Failed Write");
 
 		stop = span[1]
 	}
@@ -228,14 +233,20 @@ fn main() {
 		| Err(e) => abort(&format!("Could not read from the file {target_filename}"), Some(e)),
 	};
 
-	let mut output_file = fs::File::create("tl.out").expect("Failed Create");
+	let output_file = fs::File::create("tl.out").expect("Failed Create");
 
 	let (start, end) = consume_till_template(&file[0..], &output_file);
 
 	// the TEMPLATE_DECLARATION_KEYWORD might not have been found
 	let template_decls = parse_template_declarations(&file[start..end]);
 
+	let dc_len = template_decls.len();
+	let tt_len = target_types.len();
+	if tt_len != dc_len {
+		abort::<i32, Dummy>(&format!("The target types ({tt_len}) do not match the number of template placeholders ({dc_len})"), Void);
+	}
 
+	consume_templates(&file[end..], &template_decls, target_types, &output_file);
 
 	return;
 	/*

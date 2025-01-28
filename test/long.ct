@@ -11,7 +11,7 @@ INCL
 #define destroyMiniVector r(destroy)
 #define getElement        r(getElement)
 
-template <T, U, V>
+template <T>
 
 typedef struct {
 
