@@ -1,28 +1,55 @@
-#![allow(nonstandard_style)]
-
-/*
-Glossary, to clarify a couple of concepts
-template type: S, T, U, V, ... when considered as actual type, means kinda the same as template name
-template name: S, T, U, V, ... when considered as text
-
-*/
-
-use std::env;
-use std::fs;
-use std::io::Write;
-use std::process::exit;
-use std::usize;
+///
+/// Author: m_remon
+///
+/// Templetizer
+/// A simple rust program to convert a C file with templates into a compilable C files with the templates replaced with actual types
+///
+/// Naming:
+///   Template: the placeholder type used inside the template declaration and on the program itself
+///   Template declaration: the line `template <T, U, V, ...>` that declare for the first time a template in the program
+///
+/// Usage:
+///   templetizer input.ct T1, T2, T3, ...
+///
+/// Where:
+///   input.ct is a C file that makes use of a simple template syntax (explained below)
+///   T1, T2, T3, ... are the types to replace the templates with
+///
+/// Outside Behaviour:
+///   To know which types are templates the program searches for a C++ like template declaration in the file, only after that it will attempt to
+///   replace the Templates.
+///   The templates are replace by the given types resoecting the order, if the call is `templatizer input.ct int, double, Person` and 
+///   the template declaration is `template <T, U, V>` this is the association `T = int`,`U = double`, and`V = Person`
+///   The tool is quite stupid, it is not context aware as it uses a simple regex to detect Templates in most normal circumstances
+///   but it cannot detect if it is trying to replace a template inside a comment, and I'm too lazy to fix this
+///
+/// Inner Behaviour:
+///   To avoid replacing strings in memory I've done some gymnastics with slices when i have to write to file
+///   I copy the input file to the output file until the byte before the string to replace (or ignore in the case of the template)
+///   write the actual type, and continue with the input file. This is carried out till the end of the input
+///
+/// Syntax:
+///   `template<T, U, V, ...>` ONCE inside the input file, this is needed to know how many templates there are and their names
+///   `T` or any equivalent template used as a type, the regex search for the it surrounded by non words (a word being everythin alphanumeric + _)
+///   `#T#` a special syntax to glue the replaced type to any string near the `#` character
+///
+/// Upgrades:
+///   Comment detection: Don't replace anything inside a comment
+///   File watching: keep watching the input file (evey x sec) to transpile it if it changes
+use std::env; // to collect args
+use std::fs; // to manages files
+use std::io::Write; // to write to files
+use std::usize; // for unambiguas byte offsets
 
 extern crate regex;
-use regex::Match;
-use regex::Regex;
+use regex::Regex; // searching inside the file
 
 // constants
-const INTERNAL_WILDCARD: char = '*';
 const TEMPLATE_DECLARATION_KEYWORD: &str = "template";
-const TEMPLATE_KEY_WORD_END: &str = ">";
 
-// God forsaken code here
+
+// This struct and the relative function are an excercise in 'breaking' the type system in doing what i want
+// It's not very important, dw
 struct Dummy {}
 
 impl std::fmt::Debug for Dummy {
@@ -31,91 +58,37 @@ impl std::fmt::Debug for Dummy {
 	}
 }
 
-const Void: Option<Dummy> = Option::<Dummy>::None;
+const VOID: Option<Dummy> = Option::<Dummy>::None;
 
 /// The whole point of this function is to exit the program with an error printed, I later found out about `.expect(...)`
 /// but this is still usefull in some occasions
 fn abort<T, U: std::fmt::Debug>(s: &str, err: Option<U>) -> T {
 	match err {
-		| Some(e) => eprintln!("Aborting: {}\n\t{:#?}", s, e),
-		| None => eprintln!("Aborting: {}", s),
+		| Some(e) => eprintln!("Aborting: {s}\n\t{e:#?}"),
+		| None => eprintln!("Aborting: {s}"),
 	}
 	std::process::exit(1);
 }
 
-/// returns the position, for the given string ref, of the first `\n` after the closing curly bracket `}` matching the first open curly bracket `{`
-fn get_func_end(mut file_data: &str) -> usize {
-	let mut stack: Vec<char> = Vec::new();
-	let mut res: usize = 0;
-	let mut stop: usize = 0;
-
-	loop {
-		let open_br = file_data.find("{").unwrap_or(usize::MAX);
-		let clos_br = file_data.find("}").unwrap_or(usize::MAX);
-
-		// both paren were not found,
-		// we're done here
-		if open_br == clos_br {
-			break;
-
-		// the close bracket is first
-		} else if open_br > clos_br {
-			if !stack.last().is_some() {
-				return abort("Wrong syntax, '}' without a matching '{'", Void);
-			}
-			stack.pop().unwrap();
-			stop = clos_br + 1;
-
-		// the open bracket is first
-		} else if open_br < clos_br {
-			stack.push('{');
-			stop = open_br + 1;
-		}
-
-		res += stop;
-
-		file_data = &file_data[stop..];
-
-		if stack.is_empty() {
-			break;
-		}
-	}
-
-	res += file_data.find('\n').unwrap_or(0);
-
-	return res;
-}
-
-/// returns the index of the smallest element in the given vector
-fn min_index(arr: &Vec<usize>) -> usize {
-	// wow, such algorithm
-	let mut min = 0;
-	for i in 1..arr.len() {
-		if arr[i] < arr[min] {
-			min = i;
-		}
-	}
-
-	return min;
-}
-
 /// reads and writes to the output file the input file until the 'template<...>' keyword is found
-/// returns the parsed templated 
+/// returns the template position and span
 fn consume_till_template(file_data: &str, mut output_file: &fs::File) -> (usize, usize) {
 	let tmp = format!(r"{TEMPLATE_DECLARATION_KEYWORD}\s?<.*>");
 	let re = Regex::new(&tmp).unwrap(); // no need to take care of any error, the pattern is valid and too small to fail
 
 	let res = re.find(file_data);
+
+	// simply outut the input, no work to do
 	if res == None {
 		output_file.write(file_data.as_bytes()).expect("Failed Write");
-		return abort("Template declaration not found. Skipping", Void);
+		return abort("Template declaration not found. Skipping", VOID);
 	} else {
 		let m = res.unwrap();
 		return (m.start(), m.end());
 	}
 }
 
-/// reads and writes to the output file the input file, if a template type if found, it is replaced with the corresponding target type
+/// reads and writes to the output file the input file, if a template is found, it is replaced with the corresponding target type
 fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_types: &Vec<String>, mut output_file: &fs::File) {
 	/*
 	This function, to work nicely, would need a lexer, a tokenizer, a CFG decoder, however the fuck is called the thing in the compiler that recognizes keywords, operators, and names.
@@ -136,28 +109,25 @@ fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_t
 
 	// for all template types
 	for i in 0..template_names.len() {
-		let T = &template_names[i];
+		let t = &template_names[i];
 
-		// captruing:
+		// capturing:
 		//    a T between non words
-		//    a T preceded by two hashes ##
-		//    a T at the very start of the line followed by a non word
-		let tmp = format!(r"\W({T})\W|(##{T})|^({T})\W");
+		//    a T between two hashes ##
+		let tmp = format!(r"(#{t}#)|\W({t})\W");
 		let re = Regex::new(&tmp).unwrap(); // no need to take care of any error, the pattern is valid and too small to fail
 
 		// for all the matches
 		for c in re.captures_iter(file_data) {
+
+			// the capture are numbered, and since I'm using a disjuncton in the regex only one the 2 has actually matched
 			let mut cap = c.get(1);
 			if cap == None {
 				cap = c.get(2);
 			}
 
 			if cap == None {
-				cap = c.get(3);
-			}
-
-			if cap == None {
-				abort::<i32, Dummy>("The regex returned an empty capture, somehow.", Void);
+				abort::<i32, Dummy>("The regex returned an empty capture, somehow.", VOID);
 			}
 
 			let m = cap.unwrap();
@@ -166,26 +136,30 @@ fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_t
 		}
 	}
 
+	// FIXME: possible error here
 	// I need the matches to be in order to easily be able to write till the match, write the tartget type, and continue
 	// and the regex matches from the start of the string to the end, so in order.
 	// but if there are multiple template types the regex need to run for each one, thus possibly producing unirdered matches
 	// also I'm sorting array of non intersecting values (cuz of how the regex works) and have no idea how it works
 	positions.sort();
 
-	dbg!(&positions);
-
 	let mut stop: usize = 0;
 
 	// positions  = Vec<[start, end, index]>
 	// just like slices, start is included, end is excluded
 	for span in positions {
+		// write till before the span
 		output_file.write(file_data[stop..span[0]].as_bytes()).expect("Failed Write");
 
+		// write the replacement type
 		output_file.write(target_types[span[2]].as_bytes()).expect("Failed Write");
 
+		// skip till the end of the span
 		stop = span[1]
 	}
+	// advance to the end of the last capture
 	file_data = &file_data[stop..];
+
 	// print the rest of the chunk
 	output_file.write(file_data.as_bytes()).expect("Failed Write");
 }
@@ -197,12 +171,12 @@ fn parse_template_declarations(file_data: &str) -> Vec<String> {
 
 	let open_br = match file_data.find("<") {
 		| Some(val) => val + 1,
-		| None => abort("Invalid template syntax, missing '<'", Void),
+		| None => abort("Invalid template syntax, missing '<'", VOID),
 	};
 
 	let clos_br = match file_data.find(">") {
 		| Some(val) => val,
-		| None => abort("Invalid template syntax, missing '>'", Void),
+		| None => abort("Invalid template syntax, missing '>'", VOID),
 	};
 
 	let slice = &file_data[open_br..clos_br];
@@ -217,72 +191,51 @@ fn parse_template_declarations(file_data: &str) -> Vec<String> {
 }
 
 fn main() {
+	// --------------------------------------------------------------------------------------------
+	// checking cli args
+	// --------------------------------------------------------------------------------------------
+
 	let args: Vec<String> = env::args().collect();
 
 	match args.len() {
-		| 1 => abort("Not enough arguments: the first argument must be the target template", Void),
-		| 2 => abort("Not enough arguments: the second argument must be the type to complete the template with", Void),
+		| 1 => abort("Not enough arguments: the first argument must be the target template", VOID),
+		| 2 => abort("Not enough arguments: the second argument must be the type to complete the template with", VOID),
 		| _ => (),
 	}
 
-	let target_filename: &str = &args[1];
 	let target_types = &args[2..].to_vec();
+
+	// --------------------------------------------------------------------------------------------
+	// creating and reading files
+	// --------------------------------------------------------------------------------------------
+
+	let target_filename: &str = &args[1];
 
 	let file = match fs::read_to_string(target_filename) {
 		| Ok(dt) => dt,
 		| Err(e) => abort(&format!("Could not read from the file {target_filename}"), Some(e)),
 	};
 
+	// TODO: get the output filename from the cli
 	let output_file = fs::File::create("tl.out").expect("Failed Create");
+
+	// --------------------------------------------------------------------------------------------
+	// Searching for template declaration
+	// --------------------------------------------------------------------------------------------
 
 	let (start, end) = consume_till_template(&file[0..], &output_file);
 
-	// the TEMPLATE_DECLARATION_KEYWORD might not have been found
 	let template_decls = parse_template_declarations(&file[start..end]);
 
 	let dc_len = template_decls.len();
 	let tt_len = target_types.len();
 	if tt_len != dc_len {
-		abort::<i32, Dummy>(&format!("The target types ({tt_len}) do not match the number of template placeholders ({dc_len})"), Void);
+		abort::<i32, Dummy>(&format!("The number of types given via cli ({tt_len}) do not match the number of template placeholders ({dc_len}) present in the file."), VOID);
 	}
 
+	// --------------------------------------------------------------------------------------------
+	// Replacing the templates
+	// --------------------------------------------------------------------------------------------
+
 	consume_templates(&file[end..], &template_decls, target_types, &output_file);
-
-	return;
-	/*
-
-		// WTH Rust WTH
-		let mut file_data = &file[0..];
-		let mut line_num: usize = 0; // needed to diagnostics
-
-		// reading line by line
-		let mut nl: usize = 0;
-		loop {
-
-			match file_data.find("\n") {
-				| Some(val) => nl = val,
-				| None => break,
-			};
-
-			let line = &file_data[..nl];
-
-			line_num += 1;
-
-			file_data = &file_data[(nl + 1)..];
-			if line.contains(TEMPLATE_DECLARATION_KEYWORD) {
-				found = TRUE;
-				break;
-			}
-			output_file.write(line.as_bytes()).expect("Failed Write");
-		}
-
-
-		let dc_len = template_decls.len();
-		let tt_len = target_types.len();
-		if tt_len != dc_len {
-			abort::<i32, Dummy>(&format!("The target types ({tt_len}) do not match the number of template placeholders ({dc_len}) at line {line_num}"), Void);
-		}
-
-		complete_template(&file_data, &template_decls, target_types, &output_file);
-	*/
 }

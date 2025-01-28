@@ -1,6 +1,8 @@
 #pragma once
 
-#include <stddef.h>
+template <T>
+
+#include <T>
 
 INCL
 
@@ -11,7 +13,6 @@ INCL
 #define destroyMiniVector r(destroy)
 #define getElement        r(getElement)
 
-template <T>
 
 typedef struct {
 
@@ -19,7 +20,7 @@ typedef struct {
 	size_t capacity;    // total allocated byte
 	size_t count;       // how many elements are stored at the moment
 
-} miniVector_##T;
+} miniVector_#T#;
 
 /**
  * Make a mini vector with a preallocated array of elementSize * initalCount lenght
