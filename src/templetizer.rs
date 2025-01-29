@@ -75,7 +75,7 @@ fn abort<T, U: std::fmt::Debug>(s: &str, err: Option<U>) -> T {
 
 /// reads and writes to the output file the input file until the 'template<...>' keyword is found
 /// returns the template position and span
-fn consume_till_template(file_data: &str, mut output_file: &fs::File) -> (usize, usize) {
+fn consume_till_template(file_data: &str, output_file: &mut Box<dyn Write>) -> (usize, usize) {
 	let tmp = format!(r"{TEMPLATE_DECLARATION_KEYWORD}\s?<.*>");
 	let re = Regex::new(&tmp).unwrap(); // no need to take care of any error, the pattern is valid and too small to fail
 
@@ -92,7 +92,7 @@ fn consume_till_template(file_data: &str, mut output_file: &fs::File) -> (usize,
 }
 
 /// reads and writes to the output file the input file, if a template is found, it is replaced with the corresponding target type
-fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_types: &Vec<&String>, mut output_file: &fs::File) {
+fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_types: &Vec<&String>, output_file: &mut Box<dyn Write>) {
 	/*
 	This function, to work nicely, would need a lexer, a tokenizer, a CFG decoder, however the fuck is called the thing in the compiler that recognizes keywords, operators, and names.
 	But I ain't gonna do that.
@@ -195,7 +195,7 @@ fn parse_template_declarations(file_data: &str) -> Vec<String> {
 /// parses the arguments given and the cli swtches within
 fn parse_args(args: &Vec<String>) -> (&str, &str, Vec<&String>) {
 	let mut input_path = "";
-	let mut output_path = "tl.c";
+	let mut output_path = "";
 	let mut target_types = vec![];
 	let mut i: usize = 1;
 
@@ -274,14 +274,18 @@ fn main() {
 		| Err(e) => abort(&format!("Could not read from the file {target_filename}"), Some(e)),
 	};
 
-	// TODO: get the output filename from the cli
-	let output_file = fs::File::create(o_file).expect("Failed Create");
+	// traits are FUN :)))))) 
+	let mut output_file = Box::new(std::io::stdout()) as Box<dyn Write>;
+
+	if o_file != "" {
+		output_file = Box::new(fs::File::create(o_file).expect("Failed Create")) as Box<dyn Write>;
+	}
 
 	// --------------------------------------------------------------------------------------------
 	// Searching for template declaration
 	// --------------------------------------------------------------------------------------------
 
-	let (start, end) = consume_till_template(&file[0..], &output_file);
+	let (start, end) = consume_till_template(&file[0..], &mut output_file);
 
 	let template_decls = parse_template_declarations(&file[start..end]);
 
@@ -295,5 +299,5 @@ fn main() {
 	// Replacing the templates
 	// --------------------------------------------------------------------------------------------
 
-	consume_templates(&file[end..], &template_decls, &target_types, &output_file);
+	consume_templates(&file[end..], &template_decls, &target_types, &mut output_file);
 }
