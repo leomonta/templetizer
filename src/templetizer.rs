@@ -87,6 +87,7 @@ fn consume_till_template(file_data: &str, output_file: &mut Box<dyn Write>) -> (
 		return abort("Template declaration not found. Skipping", VOID);
 	} else {
 		let m = res.unwrap();
+		output_file.write(file_data[..m.start()].as_bytes()).expect("Failed Write");
 		return (m.start(), m.end());
 	}
 }
