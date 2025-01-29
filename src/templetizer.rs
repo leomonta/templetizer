@@ -9,16 +9,16 @@
 ///   Template declaration: the line `template <T, U, V, ...>` that declare for the first time a template in the program
 ///
 /// Usage:
-///   templetizer input.ct T1, T2, T3, ...
-///
-/// Where:
-///   input.ct is a C file that makes use of a simple template syntax (explained below)
-///   T1, T2, T3, ... are the types to replace the templates with
+///   templetizer -i input.ct -o output.c -t T1, T2, T3, ...
+/// where:
+///   -i denotes the input file, a C file that makes use of a simple template syntax (explained below)
+///   -o denotes the output file, a normal C file compilable by a combiler
+///   -t denotes the start of a type sequence T1, T2, T3, ..., they are the types used to replace the templates with
 ///
 /// Outside Behaviour:
 ///   To know which types are templates the program searches for a C++ like template declaration in the file, only after that it will attempt to
 ///   replace the Templates.
-///   The templates are replace by the given types resoecting the order, if the call is `templatizer input.ct int, double, Person` and 
+///   The templates are replace by the given types resoecting the order, if the call is `templatizer input.ct int, double, Person` and
 ///   the template declaration is `template <T, U, V>` this is the association `T = int`,`U = double`, and`V = Person`
 ///   The tool is quite stupid, it is not context aware as it uses a simple regex to detect Templates in most normal circumstances
 ///   but it cannot detect if it is trying to replace a template inside a comment, and I'm too lazy to fix this
@@ -34,12 +34,14 @@
 ///   `#T#` a special syntax to glue the replaced type to any string near the `#` character
 ///
 /// Upgrades:
+///   Better Cli interface
 ///   Comment detection: Don't replace anything inside a comment
 ///   File watching: keep watching the input file (evey x sec) to transpile it if it changes
 use std::env; // to collect args
 use std::fs; // to manages files
 use std::io::Write; // to write to files
-use std::usize; // for unambiguas byte offsets
+use std::usize;
+use std::vec; // for unambiguas byte offsets
 
 extern crate regex;
 use regex::Regex; // searching inside the file
@@ -47,6 +49,7 @@ use regex::Regex; // searching inside the file
 // constants
 const TEMPLATE_DECLARATION_KEYWORD: &str = "template";
 
+const CLI_SWITCHED: [&str; 3] = ["-i", "-o", "-t"];
 
 // This struct and the relative function are an excercise in 'breaking' the type system in doing what i want
 // It's not very important, dw
@@ -89,7 +92,7 @@ fn consume_till_template(file_data: &str, mut output_file: &fs::File) -> (usize,
 }
 
 /// reads and writes to the output file the input file, if a template is found, it is replaced with the corresponding target type
-fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_types: &Vec<String>, mut output_file: &fs::File) {
+fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_types: &Vec<&String>, mut output_file: &fs::File) {
 	/*
 	This function, to work nicely, would need a lexer, a tokenizer, a CFG decoder, however the fuck is called the thing in the compiler that recognizes keywords, operators, and names.
 	But I ain't gonna do that.
@@ -119,7 +122,6 @@ fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_t
 
 		// for all the matches
 		for c in re.captures_iter(file_data) {
-
 			// the capture are numbered, and since I'm using a disjuncton in the regex only one the 2 has actually matched
 			let mut cap = c.get(1);
 			if cap == None {
@@ -190,6 +192,68 @@ fn parse_template_declarations(file_data: &str) -> Vec<String> {
 	return res;
 }
 
+/// parses the arguments given and the cli swtches within
+fn parse_args(args: &Vec<String>) -> (&str, &str, Vec<&String>) {
+	let mut input_path = "";
+	let mut output_path = "tl.c";
+	let mut target_types = vec![];
+	let mut i: usize = 1;
+
+	// index based for to skip args if needed
+	loop {
+		if i >= args.len() {
+			break;
+		}
+
+		// input file
+		if "-i" == args[i] {
+			i += 1;
+			if i >= args.len() {
+				abort::<i32, Dummy>("Missing input file path", VOID);
+			}
+			input_path = &args[i];
+
+		// output file
+		} else if "-o" == args[i] {
+			i += 1;
+			if i >= args.len() {
+				abort::<i32, Dummy>("Missing output file path", VOID);
+			}
+			output_path = &args[i];
+
+		// target types
+		} else if "-t" == args[i] {
+
+			// everything until another cli switch
+			for k in &args[i + 1..] {
+				if CLI_SWITCHED.contains(&k.as_str()) {
+					break;
+				}
+				target_types.push(k);
+			}
+
+			i += target_types.len();
+
+		// wrong
+		} else {
+			let v = &args[i];
+			abort::<i32, Dummy>(&format!("'{v}' Unrecognized option"), VOID);
+		}
+
+		i += 1;
+	}
+
+	if input_path == "" {
+		abort::<i32, Dummy>("Missing input file path", VOID);
+	}
+
+	if target_types == vec![""] {
+		abort::<i32, Dummy>("No types to replace the template with", VOID);
+	}
+
+	return (input_path, output_path, target_types);
+}
+
 fn main() {
 	// --------------------------------------------------------------------------------------------
 	// checking cli args
@@ -197,13 +261,7 @@ fn main() {
 
 	let args: Vec<String> = env::args().collect();
 
-	match args.len() {
-		| 1 => abort("Not enough arguments: the first argument must be the target template", VOID),
-		| 2 => abort("Not enough arguments: the second argument must be the type to complete the template with", VOID),
-		| _ => (),
-	}
-
-	let target_types = &args[2..].to_vec();
+	let (i_file, o_file, target_types) = parse_args(&args);
 
 	// --------------------------------------------------------------------------------------------
 	// creating and reading files
@@ -211,13 +269,13 @@ fn main() {
 
 	let target_filename: &str = &args[1];
 
-	let file = match fs::read_to_string(target_filename) {
+	let file = match fs::read_to_string(i_file) {
 		| Ok(dt) => dt,
 		| Err(e) => abort(&format!("Could not read from the file {target_filename}"), Some(e)),
 	};
 
 	// TODO: get the output filename from the cli
-	let output_file = fs::File::create("tl.out").expect("Failed Create");
+	let output_file = fs::File::create(o_file).expect("Failed Create");
 
 	// --------------------------------------------------------------------------------------------
 	// Searching for template declaration
@@ -237,5 +295,5 @@ fn main() {
 	// Replacing the templates
 	// --------------------------------------------------------------------------------------------
 
-	consume_templates(&file[end..], &template_decls, target_types, &output_file);
+	consume_templates(&file[end..], &template_decls, &target_types, &output_file);
 }
