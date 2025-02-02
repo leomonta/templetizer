@@ -45,7 +45,7 @@ use std::sync::mpsc; // to deal with the async nature of the watcher
 use std::usize; // for unambiguous byte offsets
 
 extern crate notify;
-use notify::event::ModifyKind; // to match the correct event 
+use notify::event::ModifyKind; // to match the correct event
 use notify::EventKind;
 use notify::RecursiveMode; // this icludes the enum to specify that i DON'T want recursive watching
 use notify::Watcher; // the file changes detector
@@ -201,50 +201,55 @@ fn parse_template_declarations(file_data: &str) -> Vec<String> {
 }
 
 /// parses the arguments given and the cli swtches within
-fn parse_args(args: &Vec<String>) -> (&str, &str, Vec<&String>) {
+fn parse_args(args: &Vec<String>) -> (bool, &str, &str, Vec<&String>) {
 	let mut input_path = "";
 	let mut output_path = "";
+	let mut do_watch = false;
 	let mut target_types = vec![];
 	let mut i: usize = 1;
 
 	// index based for to skip args if needed
 	loop {
+		let arg = &args[i];
+		match arg.as_str() {
+			// input file
+			| "-i" => {
+				i += 1;
+				if i >= args.len() {
+					abort::<i32, Dummy>("Missing input file path", VOID);
+				}
+				input_path = &args[i];
+			}
+			// output file
+			| "-o" => {
+				i += 1;
+				if i >= args.len() {
+					abort::<i32, Dummy>("Missing output file path", VOID);
+				}
+				output_path = &args[i];
+			}
+			// target types
+			| "-t" => {
+				// everything until another cli switch
+				for k in &args[i + 1..] {
+					if CLI_SWITCHED.contains(&k.as_str()) {
+						break;
+					}
+					target_types.push(k);
+				}
+
+				i += target_types.len();
+			}
+			// countinuously watch the input file
+			| "--watch" => do_watch = true,
+			// wrong option
+			| _ => {
+				let v = &args[i];
+				abort::<i32, Dummy>(&format!("'{v}' Unrecognized option"), VOID);
+			}
+		}
 		if i >= args.len() {
 			break;
-		}
-
-		// input file
-		if "-i" == args[i] {
-			i += 1;
-			if i >= args.len() {
-				abort::<i32, Dummy>("Missing input file path", VOID);
-			}
-			input_path = &args[i];
-
-		// output file
-		} else if "-o" == args[i] {
-			i += 1;
-			if i >= args.len() {
-				abort::<i32, Dummy>("Missing output file path", VOID);
-			}
-			output_path = &args[i];
-
-		// target types
-		} else if "-t" == args[i] {
-			// everything until another cli switch
-			for k in &args[i + 1..] {
-				if CLI_SWITCHED.contains(&k.as_str()) {
-					break;
-				}
-				target_types.push(k);
-			}
-
-			i += target_types.len();
-
-		// wrong
-		} else {
-			let v = &args[i];
-			abort::<i32, Dummy>(&format!("'{v}' Unrecognized option"), VOID);
 		}
 
 		i += 1;
@@ -258,11 +263,10 @@ fn parse_args(args: &Vec<String>) -> (&str, &str, Vec<&String>) {
 		abort::<i32, Dummy>("No types to replace the template with", VOID);
 	}
 
-	return (input_path, output_path, target_types);
+	return (do_watch, input_path, output_path, target_types);
 }
 
 fn templetize(input_file: &str, output_file: &mut Box<dyn Write>, target_types: &Vec<&String>) {
-
 	// --------------------------------------------------------------------------------------------
 	// Reding input file
 	// --------------------------------------------------------------------------------------------
@@ -301,7 +305,7 @@ fn main() {
 
 	let args: Vec<String> = env::args().collect();
 
-	let (i_file, o_file, target_types) = parse_args(&args);
+	let (do_watch, i_file, o_file, target_types) = parse_args(&args);
 
 	// --------------------------------------------------------------------------------------------
 	// creating output file
@@ -316,32 +320,38 @@ fn main() {
 		output_file = Box::new(fs::File::create(o_file).expect("Failed Create")) as Box<dyn Write>;
 	}
 
+	// even if i have to watch the input file
+	// call directly even if no events are present
+	// would be strange if you were to start the tool and it would just wait there without doing anything
+	templetize(&i_file, &mut output_file, &target_types);
+
+	if !do_watch {
+		// we're done here
+		return;
+	}
+
 	// --------------------------------------------------------------------------------------------
 	// Setting up the file watcher
 	// --------------------------------------------------------------------------------------------
 
-	// Catches the asynchronous events (from the watcher) and transfer them to a synchrous 'Receiver'
+	// Catches the asynchronous events (from the watcher) and transfer them to a synchrous 'Receiver' (`rx`)
 	// The receiver blocks until an events is received
 	// this essentially allows me to wait a callback
 	let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
 
-	// the watches tha will send events on any change it notices
+	// the watcher that will send events on any change it notices
 	let mut watcher = notify::recommended_watcher(tx).expect("Could not create watcher");
 
 	let target_file = std::path::Path::new(i_file);
 
-	// parent returns the parent directory (duh)
-	// this is needed because some editors (e.g. Vim) delete, create a new file, and renames it to the old file instead of writing to it
-	// if I was to watch just the file, the deletion would stop the watcher from noticing any further change
+	// Parent returns the parent directory (duh)
+	// This is needed because some editors (e.g. Vim) deletes, creates a new file, and renames it to the old file instead of writing to it
+	// If I was to watch just the file, the deletion would stop the watcher from noticing any further change
 	watcher.watch(target_file.parent().unwrap(), RecursiveMode::Recursive).expect("Could not hook the watcher to the target file");
 
-	// since now I'm using a directory other files in that same directory could be changed, so i check if r.paths contains my file
-	// (r.path = Vec<PathBuf>) but the path bufs in there are the full path of the files, so I need to get the full path of my file to correctly check for it
+	// Since now I'm using a directory, other files in that same directory could be changed, so i check if `r.paths` contains my file
+	// (`r.path: Vec<PathBuf>`) but the path bufs in there are the full path of the files, so I need to get the full path of my file to correctly check for it
 	let full_path = target_file.canonicalize().expect("Canonicalizing file failed");
-
-	// call the first time even if no events are present
-	// would be strange if you were to start the tool and it would just wait there without doing anything
-	templetize(&i_file, &mut output_file, &target_types);
 
 	// --------------------------------------------------------------------------------------------
 	// Waiting for events
@@ -354,16 +364,13 @@ fn main() {
 
 		// if this my file ??
 		if r.paths.contains(&full_path) {
-
 			match r.kind {
-
 				// is the event a modification ??
 				| EventKind::Modify(c) => match c {
-
 					// a modification of data ?? (instead of name or metadata)
 					| ModifyKind::Data(_) => templetize(&i_file, &mut output_file, &target_types),
 					| _ => (),
-				}
+				},
 
 				| _ => (),
 			}
