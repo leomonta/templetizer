@@ -1,47 +1,54 @@
-///
-/// Author: m_remon
-///
-/// Templetizer
-/// A simple rust program to convert a C file with templates into a compilable C files with the templates replaced with actual types
-///
-/// Naming:
-///   Template: the placeholder type used inside the template declaration and on the program itself
-///   Template declaration: the line `template <T, U, V, ...>` that declare for the first time a template in the program
-///
-/// Usage:
-///   templetizer -i input.ct -o output.c -t T1, T2, T3, ...
-/// where:
-///   -i denotes the input file, a C file that makes use of a simple template syntax (explained below)
-///   -o denotes the output file, a normal C file compilable by a combiler
-///   -t denotes the start of a type sequence T1, T2, T3, ..., they are the types used to replace the templates with
-///
-/// Outside Behaviour:
-///   To know which types are templates the program searches for a C++ like template declaration in the file, only after that it will attempt to
-///   replace the Templates.
-///   The templates are replace by the given types resoecting the order, if the call is `templatizer input.ct int, double, Person` and
-///   the template declaration is `template <T, U, V>` this is the association `T = int`,`U = double`, and`V = Person`
-///   The tool is quite stupid, it is not context aware as it uses a simple regex to detect Templates in most normal circumstances
-///   but it cannot detect if it is trying to replace a template inside a comment, and I'm too lazy to fix this
-///
-/// Inner Behaviour:
-///   To avoid replacing strings in memory I've done some gymnastics with slices when i have to write to file
-///   I copy the input file to the output file until the byte before the string to replace (or ignore in the case of the template)
-///   write the actual type, and continue with the input file. This is carried out till the end of the input
-///
-/// Syntax:
-///   `template<T, U, V, ...>` ONCE inside the input file, this is needed to know how many templates there are and their names
-///   `T` or any equivalent template used as a type, the regex search for the it surrounded by non words (a word being everythin alphanumeric + _)
-///   `#T#` a special syntax to glue the replaced type to any string near the `#` character
-///
-/// Upgrades:
-///   Better Cli interface
-///   Comment detection: Don't replace anything inside a comment
-///   File watching: keep watching the input file (evey x sec) to transpile it if it changes
+#![allow(nonstandard_style)]
+//!
+//! Author: m_remon
+//!
+//! Templetizer
+//! A simple rust program to convert a C file with templates into a compilable C files with the templates replaced with actual types
+//!
+//! Naming:
+//!   Template: the placeholder type used inside the template declaration and on the program itself
+//!   Template declaration: the line `template <T, U, V, ...>` that declare for the first time a template in the program
+//!
+//! Usage:
+//!   templetizer -i input.ct -o output.c -t T1, T2, T3, ...
+//! where:
+//!   -i denotes the input file, a C file that makes use of a simple template syntax (explained below)
+//!   -o denotes the output file, a normal C file compilable by a combiler
+//!   -t denotes the start of a type sequence T1, T2, T3, ..., they are the types used to replace the templates with
+//!
+//! Outside Behaviour:
+//!   To know which types are templates the program searches for a C++ like template declaration in the file, only after that it will attempt to
+//!   replace the Templates.
+//!   The templates are replace by the given types resoecting the order, if the call is `templatizer input.ct int, double, Person` and
+//!   the template declaration is `template <T, U, V>` this is the association `T = int`,`U = double`, and`V = Person`
+//!   The tool is quite stupid, it is not context aware as it uses a simple regex to detect Templates in most normal circumstances
+//!   but it cannot detect if it is trying to replace a template inside a comment, and I'm too lazy to fix this
+//!
+//! Inner Behaviour:
+//!   To avoid replacing strings in memory I've done some gymnastics with slices when i have to write to file
+//!   I copy the input file to the output file until the byte before the string to replace (or ignore in the case of the template)
+//!   write the actual type, and continue with the input file. This is carried out till the end of the input
+//!
+//! Syntax:
+//!   `template<T, U, V, ...>` ONCE inside the input file, this is needed to know how many templates there are and their names
+//!   `T` or any equivalent template used as a type, the regex search for the it surrounded by non words (a word being everythin alphanumeric + _)
+//!   `#T#` a special syntax to glue the replaced type to any string near the `#` character
+//!
+//! Upgrades:
+//!   Better Cli interface
+//!   Comment detection: Don't replace anything inside a comment
+//!   File watching: keep watching the input file (evey x sec) to transpile it if it changes
 use std::env; // to collect args
 use std::fs; // to manages files
 use std::io::Write; // to write to files
-use std::usize;
-use std::vec; // for unambiguas byte offsets
+use std::sync::mpsc; // to deal with the async nature of the watcher
+use std::usize; // for unambiguous byte offsets
+
+extern crate notify;
+use notify::event::ModifyKind; // to match the correct event 
+use notify::EventKind;
+use notify::RecursiveMode; // this icludes the enum to specify that i DON'T want recursive watching
+use notify::Watcher; // the file changes detector
 
 extern crate regex;
 use regex::Regex; // searching inside the file
@@ -116,8 +123,8 @@ fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_t
 		let t = &template_names[i];
 
 		// capturing:
-		//    a T between non words
-		//    a T between two hashes ##
+		//	a T between non words
+		//	a T between two hashes ##
 		let tmp = format!(r"(#{t}#)|\W({t})\W");
 		let re = Regex::new(&tmp).unwrap(); // no need to take care of any error, the pattern is valid and too small to fail
 
@@ -224,7 +231,6 @@ fn parse_args(args: &Vec<String>) -> (&str, &str, Vec<&String>) {
 
 		// target types
 		} else if "-t" == args[i] {
-
 			// everything until another cli switch
 			for k in &args[i + 1..] {
 				if CLI_SWITCHED.contains(&k.as_str()) {
@@ -255,40 +261,25 @@ fn parse_args(args: &Vec<String>) -> (&str, &str, Vec<&String>) {
 	return (input_path, output_path, target_types);
 }
 
-fn main() {
-	// --------------------------------------------------------------------------------------------
-	// checking cli args
-	// --------------------------------------------------------------------------------------------
-
-	let args: Vec<String> = env::args().collect();
-
-	let (i_file, o_file, target_types) = parse_args(&args);
+fn templetize(input_file: &str, output_file: &mut Box<dyn Write>, target_types: &Vec<&String>) {
 
 	// --------------------------------------------------------------------------------------------
-	// creating and reading files
+	// Reding input file
 	// --------------------------------------------------------------------------------------------
 
-	let target_filename: &str = &args[1];
-
-	let file = match fs::read_to_string(i_file) {
+	// need to re-read the file cuz it has changed (duh)
+	let input_data = match fs::read_to_string(input_file) {
 		| Ok(dt) => dt,
-		| Err(e) => abort(&format!("Could not read from the file {target_filename}"), Some(e)),
+		| Err(e) => abort(&format!("Could not read from the file {input_file}"), Some(e)),
 	};
-
-	// traits are FUN :)))))) 
-	let mut output_file = Box::new(std::io::stdout()) as Box<dyn Write>;
-
-	if o_file != "" {
-		output_file = Box::new(fs::File::create(o_file).expect("Failed Create")) as Box<dyn Write>;
-	}
 
 	// --------------------------------------------------------------------------------------------
 	// Searching for template declaration
 	// --------------------------------------------------------------------------------------------
 
-	let (start, end) = consume_till_template(&file[0..], &mut output_file);
+	let (start, end) = consume_till_template(&input_data[0..], output_file);
 
-	let template_decls = parse_template_declarations(&file[start..end]);
+	let template_decls = parse_template_declarations(&input_data[start..end]);
 
 	let dc_len = template_decls.len();
 	let tt_len = target_types.len();
@@ -300,5 +291,82 @@ fn main() {
 	// Replacing the templates
 	// --------------------------------------------------------------------------------------------
 
-	consume_templates(&file[end..], &template_decls, &target_types, &mut output_file);
+	consume_templates(&input_data[end..], &template_decls, &target_types, output_file);
+}
+
+fn main() {
+	// --------------------------------------------------------------------------------------------
+	// checking cli args
+	// --------------------------------------------------------------------------------------------
+
+	let args: Vec<String> = env::args().collect();
+
+	let (i_file, o_file, target_types) = parse_args(&args);
+
+	// --------------------------------------------------------------------------------------------
+	// creating output file
+	// --------------------------------------------------------------------------------------------
+
+	// traits are FUN :))))))
+	// default is stdout
+	let mut output_file = Box::new(std::io::stdout()) as Box<dyn Write>;
+
+	// else use the given filename
+	if o_file != "" {
+		output_file = Box::new(fs::File::create(o_file).expect("Failed Create")) as Box<dyn Write>;
+	}
+
+	// --------------------------------------------------------------------------------------------
+	// Setting up the file watcher
+	// --------------------------------------------------------------------------------------------
+
+	// Catches the asynchronous events (from the watcher) and transfer them to a synchrous 'Receiver'
+	// The receiver blocks until an events is received
+	// this essentially allows me to wait a callback
+	let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
+
+	// the watches tha will send events on any change it notices
+	let mut watcher = notify::recommended_watcher(tx).expect("Could not create watcher");
+
+	let target_file = std::path::Path::new(i_file);
+
+	// parent returns the parent directory (duh)
+	// this is needed because some editors (e.g. Vim) delete, create a new file, and renames it to the old file instead of writing to it
+	// if I was to watch just the file, the deletion would stop the watcher from noticing any further change
+	watcher.watch(target_file.parent().unwrap(), RecursiveMode::Recursive).expect("Could not hook the watcher to the target file");
+
+	// since now I'm using a directory other files in that same directory could be changed, so i check if r.paths contains my file
+	// (r.path = Vec<PathBuf>) but the path bufs in there are the full path of the files, so I need to get the full path of my file to correctly check for it
+	let full_path = target_file.canonicalize().expect("Canonicalizing file failed");
+
+	// call the first time even if no events are present
+	// would be strange if you were to start the tool and it would just wait there without doing anything
+	templetize(&i_file, &mut output_file, &target_types);
+
+	// --------------------------------------------------------------------------------------------
+	// Waiting for events
+	// --------------------------------------------------------------------------------------------
+
+	// get the event (this automatically deals with ctrl+c)
+	for res in rx {
+		// skip error hanfling
+		let r = res.expect("Error reading the file status");
+
+		// if this my file ??
+		if r.paths.contains(&full_path) {
+
+			match r.kind {
+
+				// is the event a modification ??
+				| EventKind::Modify(c) => match c {
+
+					// a modification of data ?? (instead of name or metadata)
+					| ModifyKind::Data(_) => templetize(&i_file, &mut output_file, &target_types),
+					| _ => (),
+				}
+
+				| _ => (),
+			}
+		}
+	}
 }
