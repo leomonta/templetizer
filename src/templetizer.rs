@@ -57,6 +57,16 @@ use regex::Regex; // searching inside the file
 const TEMPLATE_DECLARATION_KEYWORD: &str = "template";
 
 const CLI_SWITCHED: [&str; 3] = ["-i", "-o", "-t"];
+const HELP: &str = 
+"Usage:
+templetizer -i <filename> -t <target types> [-o <filename>] [--watch]
+General options
+
+	-i <filename>         specify the input file
+	-t <list>             a space separated list of target files, it stop at the specification of another argument or at the end of the line
+	-o <filename>         specify the output file to write the transpiled code to, else stdout will be used
+	--watch               keep watching the input file for changes, if they occurr execute the templetizer again
+	-h, --help            print this screen";
 
 // This struct and the relative function are an excercise in 'breaking' the type system in doing what i want
 // It's not very important, dw
@@ -200,6 +210,11 @@ fn parse_template_declarations(file_data: &str) -> Vec<String> {
 	return res;
 }
 
+fn print_help() {
+	println!("{HELP}");
+	std::process::exit(0);
+}
+
 /// parses the arguments given and the cli swtches within
 fn parse_args(args: &Vec<String>) -> (bool, &str, &str, Vec<&String>) {
 	let mut input_path = "";
@@ -211,6 +226,7 @@ fn parse_args(args: &Vec<String>) -> (bool, &str, &str, Vec<&String>) {
 	// index based for to skip args if needed
 	loop {
 		let arg = &args[i];
+
 		match arg.as_str() {
 			// input file
 			| "-i" => {
@@ -242,17 +258,21 @@ fn parse_args(args: &Vec<String>) -> (bool, &str, &str, Vec<&String>) {
 			}
 			// countinuously watch the input file
 			| "--watch" => do_watch = true,
+			// help
+			| "--help" => print_help(),
+			| "-h" => print_help(),
 			// wrong option
 			| _ => {
 				let v = &args[i];
 				abort::<i32, Dummy>(&format!("'{v}' Unrecognized option"), VOID);
 			}
 		}
+
+		i += 1;
+
 		if i >= args.len() {
 			break;
 		}
-
-		i += 1;
 	}
 
 	if input_path == "" {
@@ -327,7 +347,7 @@ fn main() {
 
 	if !do_watch {
 		// we're done here
-		return;
+		std::process::exit(0);
 	}
 
 	// --------------------------------------------------------------------------------------------
@@ -376,4 +396,6 @@ fn main() {
 			}
 		}
 	}
+
+	std::process::exit(0);
 }

@@ -1,10 +1,10 @@
 - [ ] Done
 	- [ ] cli interface
-		- [ ] specify which template name is which type
 		- [x] basic
-		- [ ] specify which file is which
+		- [x] specify which file is which
 	- [ ] general
 		- [ ] multi file replacement with one execution
 	- [ ] main
 		- [x] basic template replacement
-		- [x] template replacement for type (e.g.vector_##T -> vector_int )
+		- [x] template replacement for type (e.g.vector_#T# -> vector_int )
+		- [x] trigger templetization on input file change
