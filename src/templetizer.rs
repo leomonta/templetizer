@@ -35,9 +35,7 @@
 //!   `#T#` a special syntax to glue the replaced type to any string near the `#` character
 //!
 //! Upgrades:
-//!   Better Cli interface
 //!   Comment detection: Don't replace anything inside a comment
-//!   File watching: keep watching the input file (evey x sec) to transpile it if it changes
 use std::env; // to collect args
 use std::fs; // to manages files
 use std::io::Write; // to write to files
@@ -57,8 +55,7 @@ use regex::Regex; // searching inside the file
 const TEMPLATE_DECLARATION_KEYWORD: &str = "template";
 
 const CLI_SWITCHED: [&str; 3] = ["-i", "-o", "-t"];
-const HELP: &str = 
-"Usage:
+const HELP: &str = "Usage:
 templetizer -i <filename> -t <target types> [-o <filename>] [--watch]
 General options
 
@@ -159,8 +156,8 @@ fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_t
 	// FIXME: possible error here
 	// I need the matches to be in order to easily be able to write till the match, write the tartget type, and continue
 	// and the regex matches from the start of the string to the end, so in order.
-	// but if there are multiple template types the regex need to run for each one, thus possibly producing unirdered matches
-	// also I'm sorting array of non intersecting values (cuz of how the regex works) and have no idea how it works
+	// but if there are multiple template types the regex need to run for each one, thus possibly producing unordered matches
+	// this is a problem because I'm sorting an array of non intersecting values (cuz of how the regex works) and have no idea how it works
 	positions.sort();
 
 	let mut stop: usize = 0;
