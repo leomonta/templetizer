@@ -14,8 +14,7 @@ A cli tool to transpile templated `C` source files into compilable `C` files
 ## Why?
 
 I prefer using `C` over `C++`, especially after the `C23` standard was released, but this means I don't have access to `C++`'s `templates`
-So if I need to use a data structure either i structure it to take `void*`, element sizes, and do a lot of casting or I'm forced to copy paste the entire code changing the type it operates on.
-Forcing me to keep multiple quasi-identical files updated if I find any bugs in them.
+So if I need to use a data structure either I structure it to take `void*`, element sizes, and do a lot of casting or I'm forced to copy paste the entire code changing the type it operates on, forcing me to keep multiple quasi-identical files updated if I find any bugs in them.
 
 Also this [talk](https://www.youtube.com/watch?v=rX0ItVEVjHc&t=4290s) from Mike acton
 
@@ -23,22 +22,23 @@ So I created this.
 
 ### Why Rust?
 
-I don't enjoy string manipulation (in `C`) and I wanted to get familiar with `Rust`
-Other than the fact that it boing quite performant is quite good.
+I don't really enjoy string manipulation (in `C`) and I wanted to get familiar with `Rust`
+Other than the fact that it being quite performant is quite good.
 
-## Modus Operandis
+## Modus Operandi
 
-I came into this project with the objective of avoiding 'in String replacement'.
-These operation necessitates additional allocations (not every time due to how `Rust` manages them) and the moving of data every time they occurr.
+I came into this project with the objective of avoiding 'in String replacement'. (i.e. replacing a part of a string with a another, usually longer, string)
+These operation necessitates the relocation of a part (in this case it may be a big part of the file) of the string, which may cause additional allocations.
 
-So, instead of doing that for each time I have to replace a string, the program:
-- Writes to the output till the beginning of the template (`o_file.write(i_file[..start])`)
+So, instead of doing that for each time I have to replace a pattern, the program:
+- Writes to the output till the beginning of the pattern (`o_file.write(i_file[..start])`)
 - Writes the replacement string (`o_file.write(target_type)`)
-- Writes the rest of the input file until the next template (`o_file.write(i_file[stop..start])`)
+- Writes the rest of the input file until the next pattern (`o_file.write(i_file[stop..start])`)
 
-Other than that the program:
-- Reads and parsed the cli args
-- Executes the templetizer on the files given
+
+Logically it performs these operations
+- Reads and parses the cli args
+- Executes the templetizer on the file given
 - If asked to watches for changes on the input file to trigger the templetizer again
 
 ## Features
@@ -63,7 +63,7 @@ General options
 
 ```
 
-The input file is `C` file with templates, (this is not a specific syntax used ouside of this context) as such the tool will search for a single template declaration `template<T, U, V, ...>`
+The input file is a `C` file with `C++` style templates, (the syntax is made up) The tool will search for a single template declaration `template<T, U, V, ...>`
 After that it will replace every instance of the declared template types found in the program, when used as types, with the corresponding target type given via the cli
 The template <-> target type association is based on the order of the target types in the command call and in the template declaration.
 
@@ -75,18 +75,18 @@ The association is
 - `V` = `size_t`
 
 Additionally the program recognizes `#T#` (where `T` is any template type) and will replace it whole with the associated target type.
-This is intended to be used for renaming structs or functions base on the type they operate on.
+This is intended to be used for renaming structs or functions based on the type they operate on.
 Nothing stops you from combining types together with something like `#T##K#` though.
 
 
 ## Caveats
 
-`C++` templates have the advantage of being 'compiled' when tey are called, having available the type defition necessary for thei correctness
-The templetizer can't do that, but can still get away with it by exploting what counts as a `target` types
+`C++` templates have the advantage of being 'compiled' when they are called, having available the type defition necessary for their correctness
+This templetizer can't do that, but can still get away with it by exploting what counts as a `target` type
 The problem really arises if you need a user defined type in a file (header or not). You could do something like `#include "T.h"` and it would work, but it might also result in `#include "int.h"` if called with `int` as target type.
 `#include "int.h"` does not compile.
 
-The solution I've found is to use a template type for the sole purpose of being a conditional include:
+The solution I've found is to use a template type for the sole purpose of being an optional include:
 ```c
 template <K, V, I>
 

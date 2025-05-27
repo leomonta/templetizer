@@ -113,7 +113,7 @@ fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_t
 	But I ain't gonna do that.
 	Not even gonna fucking try. C isn't super diffucult (except things like function pointers typedefs) but still, there are multiple standars and dialects for each compiler, thus No.
 
-	I have no idea which edge case I'm missing but oh well, I'll burn that burn when I'll get there.
+	I have no idea which edge case I'm missing but oh well, I'll burn that bridge when I'll get there.
 
 	I know that comments are not treated as such, so it might happen that a rendom `T` will get detected and promptly substituted
 	But that's a feature if you ask me, templated comments, a revoluton in documentation generation
@@ -154,10 +154,10 @@ fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_t
 	}
 
 	// FIXME: possible error here
-	// I need the matches to be in order to easily be able to write till the match, write the tartget type, and continue
+	// I need the matches to be in order to easily be able to write till the match, write the target type, and continue
 	// and the regex matches from the start of the string to the end, so in order.
 	// but if there are multiple template types the regex need to run for each one, thus possibly producing unordered matches
-	// this is a problem because I'm sorting an array of non intersecting values (cuz of how the regex works) and have no idea how it works
+	// this is a problem because I'm sorting an array of non intersecting vec3 (cuz of how the regex works) and have no idea how it works
 	positions.sort();
 
 	let mut stop: usize = 0;
@@ -305,7 +305,7 @@ fn templetize(input_file: &str, output_file: &mut Box<dyn Write>, target_types: 
 	let dc_len = template_decls.len();
 	let tt_len = target_types.len();
 	if tt_len != dc_len {
-		abort::<i32, Dummy>(&format!("The number of types given via cli ({tt_len}) do not match the number of template placeholders ({dc_len}) present in the file."), VOID);
+		abort::<i32, Dummy>(&format!("The number of types given via cli ({tt_len}) does not match the number of template placeholders ({dc_len}) present in the file."), VOID);
 	}
 
 	// --------------------------------------------------------------------------------------------
@@ -363,7 +363,7 @@ fn main() {
 
 	// Parent returns the parent directory (duh)
 	// This is needed because some editors (e.g. Vim) deletes, creates a new file, and renames it to the old file instead of writing to it
-	// If I was to watch just the file, the deletion would stop the watcher from noticing any further change
+	// If I was to just watch the file, the deletion would stop the watcher from noticing any further change
 	watcher.watch(target_file.parent().unwrap(), RecursiveMode::Recursive).expect("Could not hook the watcher to the target file");
 
 	// Since now I'm using a directory, other files in that same directory could be changed, so i check if `r.paths` contains my file
@@ -376,7 +376,7 @@ fn main() {
 
 	// get the event (this automatically deals with ctrl+c)
 	for res in rx {
-		// skip error hanfling
+		// skip error handling
 		let r = res.expect("Error reading the file status");
 
 		// if this my file ??
