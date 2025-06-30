@@ -222,6 +222,10 @@ fn parse_args(args: &Vec<String>) -> (bool, &str, &str, Vec<&String>) {
 
 	// index based for to skip args if needed
 	loop {
+		if i >= args.len() {
+			break;
+		}
+
 		let arg = &args[i];
 
 		match arg.as_str() {
@@ -267,9 +271,6 @@ fn parse_args(args: &Vec<String>) -> (bool, &str, &str, Vec<&String>) {
 
 		i += 1;
 
-		if i >= args.len() {
-			break;
-		}
 	}
 
 	if input_path == "" {
