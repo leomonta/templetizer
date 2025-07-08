@@ -8,20 +8,22 @@
 //! Naming:
 //!   Template: the placeholder type used inside the template declaration and on the program itself
 //!   Template declaration: the line `template <T, U, V, ...>` that declare for the first time a template in the program
+//!   Template type: the single type to template on, such as `T`
+//!   Target type: the type to replace a template type with, such as u8
 //!
 //! Usage:
 //!   templetizer -i input.ct -o output.c -t T1, T2, T3, ...
 //! where:
 //!   -i denotes the input file, a C file that makes use of a simple template syntax (explained below)
-//!   -o denotes the output file, a normal C file compilable by a combiler
-//!   -t denotes the start of a type sequence T1, T2, T3, ..., they are the types used to replace the templates with
+//!   -o denotes the output file, a normal C file compilable by a compiler
+//!   -t denotes the start of target types sequence T1, T2, T3, ..., they are the types used to replace the templates with
 //!
 //! Outside Behaviour:
 //!   To know which types are templates the program searches for a C++ like template declaration in the file, only after that it will attempt to
 //!   replace the Templates.
-//!   The templates are replace by the given types resoecting the order, if the call is `templatizer input.ct int, double, Person` and
+//!   The templates are replace by the given types resoecting the order, if the call is `templetizer input.ct int, double, Person` and
 //!   the template declaration is `template <T, U, V>` this is the association `T = int`,`U = double`, and`V = Person`
-//!   The tool is quite stupid, it is not context aware as it uses a simple regex to detect Templates in most normal circumstances
+//!   The tool is quite stupid, it is not context aware as it uses a simple regex to detect Templates, it functions properly in most normal circumstances
 //!   but it cannot detect if it is trying to replace a template inside a comment, and I'm too lazy to fix this
 //!
 //! Inner Behaviour:
@@ -37,7 +39,7 @@
 //! Upgrades:
 //!   Comment detection: Don't replace anything inside a comment
 use std::env; // to collect args
-use std::fs; // to manages files
+use std::fs; // to manage files
 use std::io::Write; // to write to files
 use std::sync::mpsc; // to deal with the async nature of the watcher
 use std::usize; // for unambiguous byte offsets
@@ -54,7 +56,7 @@ use regex::Regex; // searching inside the file
 // constants
 const TEMPLATE_DECLARATION_KEYWORD: &str = "template";
 
-const CLI_SWITCHED: [&str; 3] = ["-i", "-o", "-t"];
+const CLI_SWITCHES: [&str; 3] = ["-i", "-o", "-t"];
 const HELP: &str = "Usage:
 templetizer -i <filename> -t <target types> [-o <filename>] [--watch]
 General options
@@ -106,7 +108,7 @@ fn consume_till_template(file_data: &str, output_file: &mut Box<dyn Write>) -> (
 	}
 }
 
-/// reads and writes to the output file the input file, if a template is found, it is replaced with the corresponding target type
+/// reads and writes to the output file the input file, if a template type is found, it is replaced with the corresponding target type
 fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_types: &Vec<&String>, output_file: &mut Box<dyn Write>) {
 	/*
 	This function, to work nicely, would need a lexer, a tokenizer, a CFG decoder, however the fuck is called the thing in the compiler that recognizes keywords, operators, and names.
@@ -115,7 +117,7 @@ fn consume_templates(mut file_data: &str, template_names: &Vec<String>, target_t
 
 	I have no idea which edge case I'm missing but oh well, I'll burn that bridge when I'll get there.
 
-	I know that comments are not treated as such, so it might happen that a rendom `T` will get detected and promptly substituted
+	I know that comments are not treated as such, so it might happen that a random `T` will get detected and promptly substituted
 	But that's a feature if you ask me, templated comments, a revoluton in documentation generation
 
 	good luck
@@ -249,12 +251,11 @@ fn parse_args(args: &Vec<String>) -> (bool, &str, &str, Vec<&String>) {
 			| "-t" => {
 				// everything until another cli switch
 				for k in &args[i + 1..] {
-					if CLI_SWITCHED.contains(&k.as_str()) {
+					if CLI_SWITCHES.contains(&k.as_str()) {
 						break;
 					}
 					target_types.push(k);
 				}
-
 				i += target_types.len();
 			}
 			// countinuously watch the input file
@@ -270,14 +271,13 @@ fn parse_args(args: &Vec<String>) -> (bool, &str, &str, Vec<&String>) {
 		}
 
 		i += 1;
-
 	}
 
 	if input_path == "" {
 		abort::<i32, Dummy>("Missing input file path", VOID);
 	}
 
-	if target_types == vec![""] {
+	if target_types.len() == 0 {
 		abort::<i32, Dummy>("No types to replace the template with", VOID);
 	}
 
