@@ -50,13 +50,13 @@ use notify::EventKind;
 use notify::RecursiveMode; // this icludes the enum to specify that i DON'T want recursive watching
 use notify::Watcher; // the file changes detector
 
-extern crate regex;
-use regex::Regex; // searching inside the file
+extern crate regex_lite;
+use regex_lite::Regex; // searching inside the file
 
 // constants
 const TEMPLATE_DECLARATION_KEYWORD: &str = "template";
 
-const CLI_SWITCHES: [&str; 3] = ["-i", "-o", "-t"];
+const CLI_SWITCHES: [&str; 4] = ["-i", "-o", "-t", "--watch"];
 const HELP: &str = "Usage:
 templetizer -i <filename> -t <target types> [-o <filename>] [--watch]
 General options
