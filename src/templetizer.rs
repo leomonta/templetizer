@@ -41,6 +41,7 @@
 use std::env; // to collect args
 use std::fs; // to manage files
 use std::io::Write; // to write to files
+use std::io::Read; // to read from files
 use std::sync::mpsc; // to deal with the async nature of the watcher
 use std::usize; // for unambiguous byte offsets
 
@@ -61,7 +62,7 @@ const HELP: &str = "Usage:
 templetizer -i <filename> -t <target types> [-o <filename>] [--watch]
 General options
 
-	-i <filename>         specify the input file
+	-i <filename>         specify the input file, '-' for using stdin
 	-t <list>             a space separated list of target files, it stop at the specification of another argument or at the end of the line
 	-o <filename>         specify the output file to write the transpiled code to, else stdout will be used
 	--watch               keep watching the input file for changes, if they occurr execute the templetizer again
@@ -273,9 +274,6 @@ fn parse_args(args: &Vec<String>) -> (bool, &str, &str, Vec<&String>) {
 		i += 1;
 	}
 
-	if input_path == "" {
-		abort::<i32, Dummy>("Missing input file path", VOID);
-	}
 
 	if target_types.len() == 0 {
 		abort::<i32, Dummy>("No types to replace the template with", VOID);
@@ -284,24 +282,26 @@ fn parse_args(args: &Vec<String>) -> (bool, &str, &str, Vec<&String>) {
 	return (do_watch, input_path, output_path, target_types);
 }
 
-fn templetize(input_file: &str, output_file: &mut Box<dyn Write>, target_types: &Vec<&String>) {
+fn templetize(input_file: &mut Box<dyn Read>, output_file: &mut Box<dyn Write>, target_types: &Vec<&String>) {
 	// --------------------------------------------------------------------------------------------
 	// Reding input file
 	// --------------------------------------------------------------------------------------------
 
+	let mut buff: String = String::new();
+
 	// need to re-read the file cuz it has changed (duh)
-	let input_data = match fs::read_to_string(input_file) {
-		| Ok(dt) => dt,
-		| Err(e) => abort(&format!("Could not read from the file {input_file}"), Some(e)),
+	match Read::read_to_string(input_file, &mut buff) {
+		| Ok(_o) => (),
+		| Err(e) => abort(&format!("Could not read from the file input file"), Some(e)),
 	};
 
 	// --------------------------------------------------------------------------------------------
 	// Searching for template declaration
 	// --------------------------------------------------------------------------------------------
 
-	let (start, end) = consume_till_template(&input_data[0..], output_file);
+	let (start, end) = consume_till_template(&buff[0..], output_file);
 
-	let template_decls = parse_template_declarations(&input_data[start..end]);
+	let template_decls = parse_template_declarations(&buff[start..end]);
 
 	let dc_len = template_decls.len();
 	let tt_len = target_types.len();
@@ -313,7 +313,7 @@ fn templetize(input_file: &str, output_file: &mut Box<dyn Write>, target_types: 
 	// Replacing the templates
 	// --------------------------------------------------------------------------------------------
 
-	consume_templates(&input_data[end..], &template_decls, &target_types, output_file);
+	consume_templates(&buff[end..], &template_decls, &target_types, output_file);
 }
 
 fn main() {
@@ -338,10 +338,16 @@ fn main() {
 		output_file = Box::new(fs::File::create(o_file).expect("Failed Create")) as Box<dyn Write>;
 	}
 
+	let mut input_file = Box::new(std::io::stdin()) as Box<dyn Read>;
+
+	if i_file != "" && i_file != "-" {
+		input_file = Box::new(fs::File::open(i_file).expect("Failed to open file")) as Box<dyn Read>;
+	};
+
 	// even if i have to watch the input file
 	// call directly even if no events are present
 	// would be strange if you were to start the tool and it would just wait there without doing anything
-	templetize(&i_file, &mut output_file, &target_types);
+	templetize(&mut input_file, &mut output_file, &target_types);
 
 	if !do_watch {
 		// we're done here
@@ -386,7 +392,7 @@ fn main() {
 				// is the event a modification ??
 				| EventKind::Modify(c) => match c {
 					// a modification of data ?? (instead of name or metadata)
-					| ModifyKind::Data(_) => templetize(&i_file, &mut output_file, &target_types),
+					| ModifyKind::Data(_) => templetize(&mut input_file, &mut output_file, &target_types),
 					| _ => (),
 				},
 
